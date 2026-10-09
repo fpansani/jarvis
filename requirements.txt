@@ -1,0 +1,4 @@
+pyaudio
+SpeechRecognition
+pyautogui
+requests
