@@ -1,7 +1,6 @@
-from speech import SpeechRecognition
 from datetime import datetime
 import pyautogui
-from speech_recognition import SpeechRecognition
+from voice import SpeechRecognition
 from words import commands
 import functions as fn
 import re
