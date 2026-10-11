@@ -6,7 +6,7 @@ commands = {
     "apps": {
         "calc": ["calculadora", "calc", "calcular", "calcule"],
         "paint": ["paint", "desenho", "desenhar"],
-        "yt": ["youtube", "yt", "vídeo"],
+        "yt": ["youtube", "yt", "vídeo", "vídeos"],
         "word": ["word", "editor de texto", "editor", "texto", "wor", "world"],
         "excel": ["excel", "planilha", "planilhas", "plan"],
         "news": ["notícias", "cnn", "cnn brasil", "notícia"],
