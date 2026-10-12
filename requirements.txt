@@ -6,6 +6,9 @@ SpeechRecognition==3.17.0
 PyAutoGUI==0.9.54
 requests==2.34.2
 
+# Offline speech recognition (used when there is no internet). Needs a model in models/ (see README.md).
+vosk==0.3.45
+
 # Needed by PyAutoGUI's image recognition (locateOnScreen / doubleClick('img.png')).
 # PyScreeze does not install Pillow on Python 3.12+, and "confidence=" requires OpenCV.
 Pillow==12.3.0

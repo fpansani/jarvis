@@ -6,8 +6,9 @@ import pyautogui
 import speech_recognition as sr
 
 import functions as fn
+import voice
 from automacao.comum import executar_plano
-from voice import SpeechRecognition, find_microphone
+from voice import ErroModelo, ReconhecedorOffline, SpeechRecognition, find_microphone
 
 WIDTH = 47
 
@@ -26,8 +27,25 @@ def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
 
 
+def load_offline(offline):
+    """Carrega o modelo do Vosk agora (leva alguns segundos). Encerra se não for possível."""
+    if not offline.disponivel:
+        print(f"ERRO: {offline.erro}")
+        sys.exit(1)
+
+    print(f"Carregando o modelo offline '{offline.nome}'...", end=" ", flush=True)
+    inicio = time.time()
+    try:
+        offline.carregar()
+    except ErroModelo as erro:
+        print()
+        print(f"ERRO: {erro}")
+        sys.exit(1)
+    print(f"OK ({time.time() - inicio:.1f} s)")
+
+
 def startup():
-    """Verifica microfone e internet. Retorna True se estiver online."""
+    """Verifica microfone, internet e reconhecimento offline. Retorna (online, offline)."""
     print("Iniciando Jarvis...")
 
     microfone = find_microphone()
@@ -38,12 +56,21 @@ def startup():
 
     print("Verificando conexão com a internet....", end=" ", flush=True)
     online = fn.has_internet()
+    offline = ReconhecedorOffline()
+
     if online:
         print("OK")
+        # com internet o modelo só é carregado se o Google falhar no meio do uso
+        if offline.disponivel:
+            print(f"Reconhecimento offline disponível: {offline.nome}")
+        else:
+            print(f"Aviso: reconhecimento offline indisponível. {offline.erro.splitlines()[0]}")
     else:
         print("Não há conexão com a Internet! Entrando em modo off-line...")
+        load_offline(offline)
+        voice.preferir_offline()
 
-    return online
+    return online, offline
 
 
 def show_header(online):
@@ -55,13 +82,19 @@ def show_header(online):
     print("Olá, usuário. No que posso ajudar hoje?")
 
 
-def listen_for_text():
+def show_notice(message):
+    """Mostra um aviso no lugar do prompt "> " e volta a mostrar o prompt."""
+    print(f"\r{message}")
+    print("> ", end="", flush=True)
+
+
+def listen_for_text(offline):
     """Mostra o prompt e fica ouvindo até entender uma frase."""
     print("> ", end="", flush=True)
 
     while True:
         try:
-            text = SpeechRecognition()
+            text = SpeechRecognition(offline, show_notice)
         except sr.RequestError as erro:
             print(f"\nErro no serviço de reconhecimento: {erro}")
             print("> ", end="", flush=True)
@@ -77,13 +110,13 @@ def listen_for_text():
 
 def main():
     try:
-        online = startup()
+        online, offline = startup()
         time.sleep(3)
         clear_screen()
         show_header(online)
 
         while True:
-            text = listen_for_text()
+            text = listen_for_text(offline)
 
             result = fn.find_command(text)
             if result:
