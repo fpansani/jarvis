@@ -7,18 +7,20 @@ import speech_recognition as sr
 
 import functions as fn
 import voice
-from ativacao import NOME_ATALHO, AtalhoGlobal, ErroAtalho
+from atalhos import FRASES, PAUSA_ANTES_DA_FRASE
+from ativacao import FRASE, NOME_ATALHO, AtalhoGlobal, ErroAtalho, nome_atalho_numerico
 from automacao import comum
 from automacao.comum import executar_plano, log
-from voice import (ErroModelo, ReconhecedorOffline, SpeechRecognition, calibrar_microfone,
-                   find_microphone)
+from voice import (ErroModelo, EscutaCancelada, ReconhecedorOffline, SpeechRecognition,
+                   calibrar_microfone, find_microphone)
 
 WIDTH = 47
 
 # Ativação por teclado: True = o Jarvis só ouve depois do atalho (CTRL+ALT+J; para trocar a
-# tecla, veja ATALHO em ativacao.py). False = ouve o tempo todo, como antes.
+# tecla, veja ATALHO em ativacao.py) e aceita as frases prontas de CTRL+ALT+NUM 0-9 (atalhos.py).
+# False = ouve o tempo todo, como antes, sem atalhos.
 ATIVACAO_POR_TECLA = True
-BIPE_AO_OUVIR = True  # bipe curto quando o Jarvis começa a ouvir (ajuda com o console escondido)
+BIPE_AO_OUVIR = True  # bipe agudo ao começar a ouvir e grave ao cancelar (ajuda com o console escondido)
 
 AGUARDANDO = f"Pressione {NOME_ATALHO} para falar."
 
@@ -59,7 +61,7 @@ def start_hotkey():
     if not ATIVACAO_POR_TECLA:
         return None
 
-    atalho = AtalhoGlobal()
+    atalho = AtalhoGlobal(numeros=FRASES)
     try:
         atalho.iniciar()
     except ErroAtalho as erro:
@@ -126,12 +128,12 @@ def show_notice(message):
     print("> ", end="", flush=True)
 
 
-def beep():
+def beep(frequencia=880):
     if not BIPE_AO_OUVIR:
         return
     try:
         import winsound
-        winsound.Beep(880, 120)
+        winsound.Beep(frequencia, 120)
     except (ImportError, RuntimeError):  # fora do Windows, ou sem como tocar o bipe
         pass
 
@@ -157,26 +159,48 @@ def listen_for_text(offline):
 
 
 def listen_with_hotkey(atalho, offline):
-    """Espera o atalho e ouve uma frase. Retorna o texto, ou None se não entendeu."""
+    """Espera um atalho. CTRL+ALT+J: ouve uma frase. CTRL+ALT+NUM n: usa a frase pronta n.
+
+    Retorna o texto, ou None se não entendeu.
+    """
     ignorados = atalho.descartar_pendentes()
     if ignorados:
-        log(f"{ignorados} acionamento(s) de {NOME_ATALHO} ignorado(s): o Jarvis estava ocupado.")
+        log(f"{ignorados} acionamento(s) de atalho ignorado(s): o Jarvis estava ocupado.")
 
     print(AGUARDANDO, end="", flush=True)
-    atalho.esperar()
+    tipo, numero = atalho.esperar()
     print("\r" + " " * len(AGUARDANDO) + "\r", end="")   # apaga o "Pressione..."
-    log(f"{NOME_ATALHO} pressionado: ouvindo.")
 
-    beep()
-    print("> ", end="", flush=True)
+    if tipo == FRASE:
+        # aparece como se tivesse sido falada; o resto do caminho é o mesmo da voz
+        log(f"{nome_atalho_numerico(numero)}: frase pré-programada.")
+        print("> ", end="", flush=True)
+        time.sleep(PAUSA_ANTES_DA_FRASE)
+        text = FRASES[numero]
+        print(text)
+        return text
+
+    log(f"{NOME_ATALHO} pressionado: ouvindo ({NOME_ATALHO} de novo cancela).")
+
+    atalho.comecar_escuta()             # daqui em diante, CTRL+ALT+J cancela a escuta
     try:
-        text = SpeechRecognition(offline, show_notice)
-    except sr.RequestError as erro:
-        print(f"\nErro no serviço de reconhecimento: {erro}")
-        return None
-    except OSError as erro:
-        print(f"\nErro ao acessar o microfone: {erro}")
-        sys.exit(1)
+        beep()
+        print("> ", end="", flush=True)
+        try:
+            text = SpeechRecognition(offline, show_notice, atalho.cancelar)
+        except EscutaCancelada:
+            log("Escuta cancelada.")
+            beep(440)
+            print("(cancelado)")
+            return None
+        except sr.RequestError as erro:
+            print(f"\nErro no serviço de reconhecimento: {erro}")
+            return None
+        except OSError as erro:
+            print(f"\nErro ao acessar o microfone: {erro}")
+            sys.exit(1)
+    finally:
+        atalho.terminar_escuta()
 
     if text:
         print(text)

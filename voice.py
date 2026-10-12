@@ -32,6 +32,28 @@ class ErroModelo(Exception):
     """O modelo do Vosk não existe, não abriu ou o pacote 'vosk' não está instalado."""
 
 
+class EscutaCancelada(Exception):
+    """A escuta foi cancelada (por exemplo, CTRL+ALT+J apertado de novo)."""
+
+
+class _MicrofoneCancelavel:
+    """Envolve o stream do microfone: a cada pedaço lido (uns 20 a 60 ms), confere se a escuta
+    foi cancelada. O listen() do SpeechRecognition lê o microfone só por aqui, tanto esperando
+    a fala começar quanto gravando, então o cancelamento é quase imediato."""
+
+    def __init__(self, stream, cancelar):
+        self._stream = stream
+        self._cancelar = cancelar
+
+    def read(self, size):
+        if self._cancelar.is_set():
+            raise EscutaCancelada()
+        return self._stream.read(size)
+
+    def close(self):
+        self._stream.close()
+
+
 def calibrar_microfone(segundos=1):
     """Mede o ruído do ambiente uma vez, para não gastar 1 s calibrando a cada frase.
 
@@ -214,23 +236,35 @@ def _transcrever_offline(offline, audio, avisar):
     return texto
 
 
-def SpeechRecognition(offline=None, avisar=_aviso_padrao):
+def SpeechRecognition(offline=None, avisar=_aviso_padrao, cancelar=None):
     """Escuta uma vez e retorna o texto falado.
 
     Usa o Google quando há internet. Se o Google falhar (sem conexão, tempo esgotado) e houver um
     ReconhecedorOffline disponível, a mesma fala é reconhecida pelo Vosk, e o Vosk continua sendo
     usado por SEGUNDOS_OFFLINE segundos antes de o Google ser tentado de novo.
 
+    cancelar: threading.Event opcional. Se for ativado durante a escuta, ela para na hora; se for
+    ativado durante o reconhecimento, o resultado é descartado. Nos dois casos: EscutaCancelada.
+
     Retorna None se nenhuma fala foi detectada ou se a fala não foi entendida.
     Erros do serviço de reconhecimento (sr.RequestError) e do microfone (OSError)
     são propagados para quem chamou.
     """
+    texto = _ouvir_e_reconhecer(offline, avisar, cancelar)
+    if cancelar is not None and cancelar.is_set():
+        raise EscutaCancelada()
+    return texto
+
+
+def _ouvir_e_reconhecer(offline, avisar, cancelar):
     global _usar_google_a_partir_de, _avisou_offline, _limiar_energia
 
     recognition = sr.Recognizer()
     recognition.operation_timeout = TEMPO_LIMITE_GOOGLE
 
     with sr.Microphone() as microfone:
+        if cancelar is not None:
+            microfone.stream = _MicrofoneCancelavel(microfone.stream, cancelar)
         if _limiar_energia is None:
             recognition.adjust_for_ambient_noise(microfone, duration=1)
         else:

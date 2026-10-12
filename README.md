@@ -104,6 +104,7 @@ When the screen shows `Pressione CTRL+ALT+J para falar.`, press **CTRL+ALT+J** (
 ### Keyboard activation
 
 - Jarvis only listens after **CTRL+ALT+J**. If you say nothing for 10 seconds, it shows `(não entendi)` and waits for the shortcut again.
+- **Cancel:** press **CTRL+ALT+J again while Jarvis is listening**. It stops right away, plays a lower beep, shows `(cancelado)` and waits for the shortcut again. If you press it while your sentence is already being recognized, the result is discarded and nothing is executed.
 - Presses made while Jarvis is busy (listening or running a task) are ignored, so a double press does not start a second command.
 - The keys Jarvis itself types through PyAutoGUI never trigger the shortcut.
 - The shortcut still reaches the window in front. CTRL+ALT+J does nothing in the apps Jarvis uses, but keep that in mind if you change it.
@@ -111,6 +112,29 @@ When the screen shows `Pressione CTRL+ALT+J para falar.`, press **CTRL+ALT+J** (
 - **Always listening, as before:** set `ATIVACAO_POR_TECLA = False` in `main.py`. Jarvis also falls back to this mode by itself (and says so in the header) if the shortcut cannot be enabled.
 - **No beep:** set `BIPE_AO_OUVIR = False` in `main.py`.
 - The microphone is calibrated once at startup (stay quiet for that second), so Jarvis starts listening right after the shortcut.
+
+### Pre-programmed phrases (CTRL+ALT+NUM 0-9)
+
+For presentations, **CTRL+ALT + a number on the numeric keypad** makes Jarvis act as if you had said a fixed phrase: after a short pause the phrase appears after `> `, exactly like recognized speech, and goes through the same commands. The microphone is not used.
+
+| Shortcut | Phrase | Needs internet |
+|---|---|---|
+| CTRL+ALT+NUM 1 | "Jarvis, que horas são?" | No |
+| CTRL+ALT+NUM 2 | "Jarvis, qual a temperatura em Santo André?" | Yes |
+| CTRL+ALT+NUM 3 | "Jarvis, calcule 5 vezes 2." (only says the result; does not open the Calculator) | No |
+| CTRL+ALT+NUM 4 | "Jarvis, crie um novo documento no Word e escreva uma saudação." | No |
+| CTRL+ALT+NUM 5 | "Jarvis, crie uma nova planilha no Excel." | No |
+| CTRL+ALT+NUM 6 | "Jarvis, abra o Paint." | No |
+| CTRL+ALT+NUM 7 | "Jarvis, abra o YouTube." | Yes |
+| CTRL+ALT+NUM 8 | "Jarvis, me mostre as notícias do dia." | Yes |
+| CTRL+ALT+NUM 9 | "Jarvis, abra o site do colégio." | Yes |
+| CTRL+ALT+NUM 0 | "Jarvis, abra o Instagram do colégio." | Yes |
+
+- Only the **numeric keypad** keys work (with NumLock on or off), not the numbers above the letters.
+- These keys are blocked for the window in front, so Word or Notepad never receive the number while you use a shortcut. Numeric keypad keys without CTRL+ALT keep working normally.
+- **Change a phrase:** edit `FRASES` in `atalhos.py` (write it the way you would say it). Delete a line to free that key.
+- **Pause before the phrase appears:** `PAUSA_ANTES_DA_FRASE` in `atalhos.py` (use `0` to show it immediately).
+- **Test the shortcuts without running anything:** `python ativacao.py` prints which shortcut was detected and its phrase. Keep Notepad in front while testing: no numbers should appear in it.
 
 ## Debug messages
 
