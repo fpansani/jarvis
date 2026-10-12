@@ -11,7 +11,7 @@ from automacao import paint as paint_auto
 from automacao import site_clovis as site_auto
 from automacao import word as word_auto
 from automacao import youtube as yt_auto
-from automacao.comum import Plano, simplificar, tem_internet
+from automacao.comum import Plano, log, simplificar, tem_internet
 
 
 def has_internet(timeout=3):
@@ -26,7 +26,9 @@ def find_command(text):
         for name, keywords in group.items():
             for keyword in keywords:
                 if re.search(rf"\b{re.escape(simplificar(keyword))}\b", text):
+                    log(f'Comando detectado: {category}/{name} (palavra-chave "{keyword}")')
                     return category, name
+    log(f'Nenhuma palavra-chave encontrada em "{text}"')
     return None
 
 def time():
@@ -88,15 +90,19 @@ def find_city(nome):
     # a busca também devolve nomes parecidos ("Sao Paulo" traz "Frei Paulo"): exige o mesmo nome
     alvo = simplificar(nome)
     iguais = [r for r in resultados if simplificar(r.get("name", "")) == alvo]
+    log(f'Geocodificação de "{nome}": {len(resultados)} resultado(s), {len(iguais)} com o mesmo nome.')
     if not iguais:
         raise CityNotFound(nome)
 
     escolhida = next((r for r in iguais if r.get("country_code") == "BR"), iguais[0])
+    log(f"Cidade escolhida: {escolhida['name']} ({escolhida.get('admin1', '?')}, "
+        f"{escolhida.get('country_code', '?')}) em {escolhida['latitude']}, {escolhida['longitude']}")
     return escolhida["name"], escolhida["latitude"], escolhida["longitude"]
 
 
 def degree(frase=""):
     cidade = extract_city(frase)
+    log(f'Cidade extraída da frase: {cidade!r}' + (f" (usando o padrão: {CIDADE_PADRAO})" if cidade is None else ""))
     if cidade is None or simplificar(cidade) == simplificar(CIDADE_PADRAO):
         nome = CIDADE_PADRAO
         latitude, longitude = COORDENADAS_PADRAO
@@ -109,8 +115,11 @@ def degree(frase=""):
         "longitude": longitude,
         "current": "temperature_2m",
     }
+    inicio = datetime.now()
     response = requests.get(url, params=params, timeout=5)
     data = response.json()
+    log(f"Open-Meteo respondeu em {(datetime.now() - inicio).total_seconds():.1f} s: "
+        f"{data.get('current', {}).get('temperature_2m')} ºC")
     temp = round(data["current"]["temperature_2m"])
     return f"A temperatura em {nome} é de {temp}ºC."
 

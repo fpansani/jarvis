@@ -5,7 +5,7 @@ from typing import NamedTuple
 
 import pyautogui
 
-from .comum import (Plano, erro, janela_ativa_eh, iniciar_programa, rodar_isolado,
+from .comum import (Plano, erro, janela_ativa_eh, iniciar_programa, log, rodar_isolado,
                    mencionou, seguro, simplificar)
 
 # "jarvis, abra a calculadora"                  -> só abre a calculadora
@@ -207,10 +207,14 @@ def digitar_conta(conta):
 
 def planejar(frase=""):
     if re.search(r"\bcalcul(?:ar|e|a)\b", simplificar(frase)):
+        trecho = extrair_conta(frase)
         try:
-            conta = avaliar_conta(extrair_conta(frase))
+            conta = avaliar_conta(trecho)
         except ContaInvalida as e:
+            log(f'Conta não entendida em "{trecho}": {e}')
             return Plano(str(e))
+        log(f'Conta: "{trecho}" -> {" ".join(conta.tokens)} = {conta.resultado}'
+            + (" (precisa de precedência: modo Científico)" if conta.precisa_precedencia else ""))
         resposta = f"O resultado de {conta.exibicao} é {conta.resultado}."
         if mencionou(frase, "calculadora"):
             return Plano(resposta, lambda: digitar_conta(conta))   # pediu a calculadora: digita lá

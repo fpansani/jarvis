@@ -7,6 +7,7 @@ import speech_recognition as sr
 
 import functions as fn
 import voice
+from automacao import comum
 from automacao.comum import executar_plano
 from voice import ErroModelo, ReconhecedorOffline, SpeechRecognition, find_microphone
 
@@ -78,6 +79,8 @@ def show_header(online):
     print("VER. 1.0 - PRESSIONE CTRL+C PARA SAIR".center(WIDTH).rstrip())
     if not online:
         print("Modo off-line".center(WIDTH).rstrip())
+    if comum.DEBUG:
+        print("** MODO DEBUG **".center(WIDTH).rstrip())
     print("-" * WIDTH)
     print("Olá, usuário. No que posso ajudar hoje?")
 

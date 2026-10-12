@@ -100,6 +100,27 @@ python main.py
 
 Wait for the program to start listening, then speak your command.
 
+## Debug messages
+
+By default Jarvis only shows what you said, its answers and, when something fails, the reason. To see the step-by-step messages (automation attempts, window titles, recognition and response times, which keyword matched each command, how the city was found, which Vosk model was chosen), turn on debug mode in either of these ways:
+
+- **In the code:** in `automacao/comum.py`, change `DEBUG = False` to `DEBUG = True`.
+- **Only for one run, without editing the code:** set the `JARVIS_DEBUG` environment variable before starting Jarvis:
+
+  ```powershell
+  $env:JARVIS_DEBUG = "1"    # PowerShell
+  python main.py
+  ```
+
+  ```bat
+  set JARVIS_DEBUG=1
+  python main.py
+  ```
+
+  It stays on for that terminal window; close it (or set `JARVIS_DEBUG` to `0`) to turn it off.
+
+Debug lines start with `[debug]`, and the header shows "Modo debug" while it is on. The same setting applies to the automations tested alone (`python -m automacao.calc ...`).
+
 ## Commands
 
 Speak naturally; Jarvis matches keywords from `words.py` (accents and capitalization are ignored). After answering, it waits 2 seconds and then runs the automation.

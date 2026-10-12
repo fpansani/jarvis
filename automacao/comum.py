@@ -9,6 +9,7 @@ Toda ação passa pelo decorator `seguro`: nenhum erro do PyAutoGUI derruba o Ja
 A ação devolve True (deu certo) ou False (algo falhou; a mensagem já foi mostrada).
 """
 import functools
+import os
 import re
 import socket
 import sys
@@ -36,8 +37,21 @@ _SEM_OPENCV = False
 
 # ---------------------------------------------------------------- mensagens
 
+# Mensagens de depuração (tentativas, títulos de janela, tempos, comando detectado...).
+# False: só aparecem as respostas do Jarvis e os erros. Mude para True para reativá-las.
+# Também dá para ligar sem mexer no código, antes de rodar o Jarvis:
+#   CMD:        set JARVIS_DEBUG=1
+#   PowerShell: $env:JARVIS_DEBUG = "1"
+DEBUG = False
+
+if os.environ.get("JARVIS_DEBUG", "").strip() not in ("", "0"):
+    DEBUG = True
+
+
 def log(texto):
-    print(texto)
+    """Mensagem de depuração: só aparece com DEBUG = True."""
+    if DEBUG:
+        print(f"[debug] {texto}")
 
 
 def erro(texto, titulo="Erro"):
@@ -45,7 +59,7 @@ def erro(texto, titulo="Erro"):
     print(texto)
     if ALERTAS:
         try:
-            pyautogui.alert(text=texto, title=titulo, button="OK")
+            pyautogui.alert(text=texto, title=titulo, button="OK") # type: ignore
         except Exception:
             pass
 
@@ -53,7 +67,7 @@ def erro(texto, titulo="Erro"):
 def fim_da_execucao():
     if ALERTAS:
         try:
-            pyautogui.alert(text="Fim da execucao", title="", button="OK")
+            pyautogui.alert(text="Fim da execucao", title="", button="OK") # type: ignore
         except Exception:
             pass
 
@@ -66,13 +80,24 @@ class Plano:
     acao: Optional[Callable[[], bool]] = None
 
 
+def _nome_acao(acao):
+    nome = getattr(acao, "__name__", "")
+    return "ação" if not nome or nome == "<lambda>" else nome
+
+
 def executar_plano(plano):
     """Imprime a resposta, espera ATRASO_APOS_RESPOSTA s e executa a ação."""
     print(plano.resposta)
     if plano.acao is None:
         return False
     time.sleep(ATRASO_APOS_RESPOSTA)
-    return bool(plano.acao())
+
+    nome = _nome_acao(plano.acao)
+    log(f"Executando {nome}...")
+    inicio = time.time()
+    sucesso = bool(plano.acao())
+    log(f"{nome} terminou em {time.time() - inicio:.1f} s ({'sucesso' if sucesso else 'falhou'}).")
+    return sucesso
 
 
 def rodar_isolado(planejar):
@@ -156,7 +181,7 @@ def mencionou(frase, *palavras):
 def titulo_janela():
     """Título da janela ativa (vazio se não for possível obter)."""
     try:
-        return pyautogui.getActiveWindowTitle() or ""
+        return pyautogui.getActiveWindowTitle() or "" # type: ignore
     except Exception:
         return ""
 
@@ -177,11 +202,19 @@ def janela_ativa_eh(condicao):
 def aguardar_titulo(condicao, timeout=10, intervalo=0.5):
     """Espera até a janela ativa satisfazer 'condicao'. False se estourar o timeout."""
     teste = _criar_teste(condicao)
-    fim = time.time() + timeout
+    inicio = time.time()
+    fim = inicio + timeout
+    ultimo = None
     while time.time() < fim:
-        if teste(titulo_janela()):
+        titulo = titulo_janela()
+        if titulo != ultimo:              # registra só quando o título muda
+            log(f'Janela ativa: "{titulo}"')
+            ultimo = titulo
+        if teste(titulo):
+            log(f"Janela esperada encontrada em {time.time() - inicio:.1f} s.")
             return True
         time.sleep(intervalo)
+    log(f'Tempo esgotado ({timeout} s) esperando a janela. Último título: "{ultimo}"')
     return False
 
 
@@ -197,6 +230,7 @@ def tem_internet(timeout=3):
 
 def iniciar_programa(busca, condicao_janela, nome, timeout=20):
     """Abre um programa pelo menu Iniciar e espera a janela dele ficar ativa."""
+    log(f'Abrindo "{nome}" pelo menu Iniciar (busca: "{busca}").')
     pyautogui.press("win")
     time.sleep(ESPERA_MENU_INICIAR)  # sem isso as primeiras letras se perdem
     pyautogui.write(busca, interval=0.2)
@@ -285,6 +319,7 @@ def abrir_site(url, titulo_esperado, pos_abertura=None):
         return False
 
     # --- Abrir o Edge ---
+    log(f"Abrindo o Edge para carregar {url}.")
     pyautogui.press("win")
     time.sleep(ESPERA_MENU_INICIAR)
     pyautogui.write("edge", interval=0.2)

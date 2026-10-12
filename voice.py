@@ -5,6 +5,9 @@ from pathlib import Path
 
 import speech_recognition as sr
 
+from automacao import comum
+from automacao.comum import log
+
 # Reconhecimento offline (Vosk): o modelo fica na pasta models/, ao lado deste arquivo.
 PASTA_MODELOS = Path(__file__).resolve().parent / "models"
 VARIAVEL_MODELO = "JARVIS_MODELO_VOSK"   # opcional: escolhe o modelo quando houver mais de um
@@ -87,10 +90,14 @@ def escolher_modelo():
     else:
         candidatos = achar_modelos(PASTA_MODELOS)
         if not candidatos:
+            log(f"Nenhum modelo do Vosk em {PASTA_MODELOS}.")
             return None
 
     grandes = [c for c in candidatos if "small" not in c.name.lower()]
-    return (grandes or candidatos)[0]
+    escolhido = (grandes or candidatos)[0]
+    origem = f"{VARIAVEL_MODELO}={pedido}" if pedido else str(PASTA_MODELOS)
+    log(f"Modelos do Vosk ({origem}): {[c.name for c in candidatos]} -> usando {escolhido}")
+    return escolhido
 
 
 class ReconhecedorOffline:
@@ -165,13 +172,30 @@ def _aviso_padrao(mensagem):
     print(f"\r{mensagem}")
 
 
+def _debug(avisar, mensagem):
+    """Debug durante a escuta: passa pelo 'avisar' para não bagunçar o prompt "> "."""
+    if comum.DEBUG:
+        avisar(f"[debug] {mensagem}")
+
+
 def _transcrever_offline(offline, audio, avisar):
-    if not offline.carregado:
-        avisar(f"Carregando o modelo offline '{offline.nome}'...")
     try:
-        return offline.transcrever(audio)
+        if not offline.carregado:
+            avisar(f"Carregando o modelo offline '{offline.nome}'...")
+            inicio = time.monotonic()
+            offline.carregar()
+            _debug(avisar, f"Modelo carregado em {time.monotonic() - inicio:.1f} s.")
+        inicio = time.monotonic()
+        texto = offline.transcrever(audio)
     except ErroModelo as e:
         raise sr.RequestError(str(e)) from e
+
+    duracao = time.monotonic() - inicio
+    if texto:
+        _debug(avisar, f"Vosk reconheceu em {duracao:.2f} s.")
+    else:
+        _debug(avisar, f"Vosk não entendeu a fala ({duracao:.2f} s).")
+    return texto
 
 
 def SpeechRecognition(offline=None, avisar=_aviso_padrao):
@@ -202,22 +226,29 @@ def SpeechRecognition(offline=None, avisar=_aviso_padrao):
         except sr.WaitTimeoutError:
             return None
 
+    _debug(avisar, f"Áudio capturado: {len(audio.frame_data) / (audio.sample_rate * audio.sample_width):.1f} s.")
     tem_offline = offline is not None and offline.disponivel
 
-    if tem_offline and time.monotonic() < _usar_google_a_partir_de:
+    agora = time.monotonic()
+    if tem_offline and agora < _usar_google_a_partir_de:
+        _debug(avisar, f"Usando o Vosk direto (o Google volta a ser tentado em {_usar_google_a_partir_de - agora:.0f} s).")
         return _transcrever_offline(offline, audio, avisar)
 
+    inicio = time.monotonic()
     try:
         texto = recognition.recognize_google(
             audio,
             language='pt-BR'
         )
+        _debug(avisar, f"Google reconheceu em {time.monotonic() - inicio:.2f} s.")
         _avisou_offline = False
         return texto
     except sr.UnknownValueError:
+        _debug(avisar, f"Google não entendeu a fala ({time.monotonic() - inicio:.2f} s).")
         _avisou_offline = False
         return None
     except (sr.RequestError, OSError) as erro:
+        _debug(avisar, f"Google falhou após {time.monotonic() - inicio:.1f} s: {type(erro).__name__}: {erro}")
         if not tem_offline:
             if isinstance(erro, sr.RequestError):
                 raise

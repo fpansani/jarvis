@@ -10,7 +10,7 @@ from .comum import (Plano, aguardar_titulo, encontrar_e_clicar, erro, iniciar_pr
 # "jarvis, crie um novo documento no word e escreva uma saudação."        -> saudacao
 RESPOSTAS = {
     "abrir": "Certo, irei abrir o Word.",
-    "novo": "Certo, irei abrir e criar um novo documento no Word.",
+    "novo": "Certo, irei criar um novo documento no Word.",
     "saudacao": "Certo, irei criar um novo documento e escrever uma saudação no Word.",
 }
 
