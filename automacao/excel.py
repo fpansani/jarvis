@@ -1,16 +1,24 @@
+"""Excel: abre o programa e, se pedido, cria uma planilha em branco.
+
+"jarvis, abra o excel."                                              -> abrir
+"jarvis, crie uma nova planilha no excel." / "faça uma planilha no excel" -> novo
+
+Testar sozinho (da pasta do projeto):  python -m automacao.excel crie uma nova planilha no excel
+"""
 import time
 
 import pyautogui
 
-from .comum import (Plano, aguardar_titulo, erro, iniciar_programa, mencionou,
-                   rodar_isolado, seguro)
+from .comum import (Plano, aguardar_titulo, erro, iniciar_programa, log, mencionou,
+                    rodar_isolado, seguro, simplificar, titulo_janela)
 
-# "jarvis, abra o excel."                    -> abrir
-# "jarvis, crie uma nova planilha no excel." -> novo
 RESPOSTAS = {
     "abrir": "Certo, irei abrir o Excel.",
     "novo": "Certo, irei abrir e criar uma nova planilha no Excel.",
 }
+
+# Palavras que pedem uma planilha nova (sem elas, o Jarvis só abre o Excel)
+PALAVRAS_CRIAR = ("novo", "nova", "crie", "criar", "cria", "faça", "faz", "fazer", "documento")
 
 
 def _eh_excel(titulo):
@@ -23,7 +31,7 @@ def _eh_planilha(titulo):
 
 
 def detectar_modo(frase):
-    if mencionou(frase, "novo", "nova", "crie", "criar", "cria", "documento"):
+    if mencionou(frase, *PALAVRAS_CRIAR):
         return "novo"
     return "abrir"
 
@@ -35,15 +43,21 @@ def abrir_excel():
 
 @seguro("criar uma nova planilha no Excel")
 def nova_planilha():
-    if not iniciar_programa("excel", _eh_excel, "Excel", timeout=30):
+    # Uma planilha que já estava na frente não pode ser confundida com a nova (o Enter iria nela).
+    antes = simplificar(titulo_janela())
+    evitar = antes if _eh_planilha(antes) else None
+    eh_a_nova = lambda titulo: _eh_planilha(titulo) and titulo != evitar  # noqa: E731
+
+    if not iniciar_programa("excel", _eh_excel, "Excel", timeout=30, evitar=evitar):
         return False
 
     # Cria uma nova planilha: espera a tela inicial carregar e aperta Enter
     time.sleep(2)
     pyautogui.press("enter")
-    if not aguardar_titulo(_eh_planilha, timeout=15):
+    if not aguardar_titulo(eh_a_nova, timeout=15):
         erro("Não consegui confirmar a criação da nova planilha no Excel.")
         return False
+    log("Nova planilha criada.")
     return True
 
 
@@ -55,6 +69,4 @@ def planejar(frase=""):
 
 
 if __name__ == "__main__":
-    # python excel.py abra o excel
-    # python excel.py crie uma nova planilha no excel
     rodar_isolado(planejar)

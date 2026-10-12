@@ -1,12 +1,13 @@
-"""Funções compartilhadas pelos scripts PyAutoGUI do Jarvis.
+"""Funções compartilhadas pelas automações (PyAutoGUI) e pelo resto do Jarvis.
 
-Cada script (calc.py, word.py, youtube.py, ...) expõe uma função `planejar(frase)`
-que devolve um `Plano`: a resposta do Jarvis + a ação (função sem argumentos) a
-executar. `executar_plano` imprime a resposta, espera ATRASO_APOS_RESPOSTA segundos
-e só então roda a ação.
+Cada automação (calc.py, word.py, youtube.py...) expõe `planejar(frase)`, que devolve um
+`Plano`: a resposta do Jarvis + a ação (função sem argumentos) a executar. `executar_plano`
+mostra a resposta, espera ATRASO_APOS_RESPOSTA segundos e só então roda a ação.
 
-Toda ação passa pelo decorator `seguro`: nenhum erro do PyAutoGUI derruba o Jarvis.
-A ação devolve True (deu certo) ou False (algo falhou; a mensagem já foi mostrada).
+Toda ação passa pelo decorador `seguro`: nenhum erro do PyAutoGUI derruba o Jarvis. A ação
+devolve True (deu certo) ou False (algo falhou; o motivo já foi mostrado).
+
+Aqui também ficam as mensagens de depuração (DEBUG / SALVAR_LOG), usadas por todos os módulos.
 """
 import functools
 import os
@@ -14,52 +15,108 @@ import re
 import socket
 import sys
 import time
+import traceback
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
 import pyautogui
 
-pyautogui.PAUSE = 0.4
+pyautogui.PAUSE = 0.4      # pausa automática depois de cada comando do PyAutoGUI
 pyautogui.FAILSAFE = True  # levar o mouse a um canto da tela interrompe a automação
 
+PASTA_PROJETO = Path(__file__).resolve().parent.parent
 PASTA_IMGS = Path(__file__).resolve().parent / "imgs"
 
-ATRASO_APOS_RESPOSTA = 2   # segundos entre a resposta do Jarvis e a execução
-ESPERA_MENU_INICIAR = 1    # segundos para o menu Iniciar abrir antes de digitar
-ALERTAS = False            # True nos testes isolados (python calc.py): mostra caixas de diálogo
+ATRASO_APOS_RESPOSTA = 2       # segundos entre a resposta do Jarvis e a execução da ação
+ESPERA_MENU_INICIAR = 1        # segundos para o menu Iniciar abrir antes de digitar
+ESPERA_RESULTADO_BUSCA = 0.5   # segundos para a busca do menu Iniciar achar o programa antes do Enter
+ALERTAS = False                # True ao testar uma automação sozinha (python -m automacao.calc ...)
 
 IMAGENS_BARRA = ["edge-searchbar.png", "edge-searchbar-blink.png"]
 
 _SEM_OPENCV = False
 
 
-# ---------------------------------------------------------------- mensagens
+# ---------------------------------------------------------------- depuração
 
-# Mensagens de depuração (tentativas, títulos de janela, tempos, comando detectado...).
-# False: só aparecem as respostas do Jarvis e os erros. Mude para True para reativá-las.
-# Também dá para ligar sem mexer no código, antes de rodar o Jarvis:
-#   CMD:        set JARVIS_DEBUG=1
-#   PowerShell: $env:JARVIS_DEBUG = "1"
+# DEBUG: mostra no console as mensagens de depuração ([debug] + horário): tentativas, títulos de
+# janela, tempos, comando detectado, erros inesperados com o traceback...
+# False: o console mostra só as respostas do Jarvis e os erros.
 DEBUG = False
 
-if os.environ.get("JARVIS_DEBUG", "").strip() not in ("", "0"):
+# SALVAR_LOG: grava as mesmas mensagens (e os erros) no arquivo jarvis.log, na pasta do projeto,
+# mesmo com DEBUG = False. Útil em apresentações: a tela fica limpa e, se algo falhar, o motivo
+# fica registrado no arquivo.
+SALVAR_LOG = False
+ARQUIVO_LOG = PASTA_PROJETO / "jarvis.log"
+
+# Também dá para ligar sem mexer no código, antes de rodar o Jarvis:
+#   CMD:        set JARVIS_DEBUG=1        set JARVIS_LOG=1
+#   PowerShell: $env:JARVIS_DEBUG = "1"   $env:JARVIS_LOG = "1"
+
+
+def _ligado_no_ambiente(variavel):
+    return os.environ.get(variavel, "").strip() not in ("", "0")
+
+
+if _ligado_no_ambiente("JARVIS_DEBUG"):
     DEBUG = True
+if _ligado_no_ambiente("JARVIS_LOG"):
+    SALVAR_LOG = True
 
 
-def log(texto):
-    """Mensagem de depuração: só aparece com DEBUG = True."""
+def _agora():
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+
+def texto_debug(texto):
+    """Formata uma mensagem de depuração para o console: "[debug 14:03:22.123] texto"."""
+    return f"[debug {_agora()}] {texto}"
+
+
+def _gravar_log(nivel, texto):
+    """Acrescenta uma linha ao jarvis.log (se SALVAR_LOG). Nunca derruba o Jarvis."""
+    global SALVAR_LOG
+    if not SALVAR_LOG:
+        return
+    try:
+        data = datetime.now().strftime("%Y-%m-%d")
+        with open(ARQUIVO_LOG, "a", encoding="utf-8") as arquivo:
+            arquivo.write(f"{data} {_agora()} [{nivel}] {texto}\n")
+    except OSError as e:
+        SALVAR_LOG = False
+        print(f"Aviso: não consegui gravar o log em {ARQUIVO_LOG} ({e}). Log em arquivo desligado.")
+
+
+def log(texto, mostrar=None):
+    """Mensagem de depuração: aparece no console só com DEBUG = True (e vai para o arquivo
+    com SALVAR_LOG = True). 'mostrar' troca o print, para não bagunçar o prompt "> "."""
+    _gravar_log("debug", texto)
     if DEBUG:
-        print(f"[debug] {texto}")
+        (mostrar or print)(texto_debug(texto))
+
+
+def log_excecao(contexto):
+    """Registra a exceção que está sendo tratada, com o traceback (no debug e no arquivo).
+
+    Chame dentro de um `except`. Fora do debug, o usuário vê só a mensagem curta do erro.
+    """
+    detalhes = traceback.format_exc().rstrip()
+    _gravar_log("erro", f"{contexto}\n{detalhes}")
+    if DEBUG:
+        print(texto_debug(f"{contexto}\n{detalhes}"))
 
 
 def erro(texto, titulo="Erro"):
-    """Mostra um erro; nos testes isolados também abre a caixa de diálogo."""
+    """Mostra um erro (sempre visível); ao testar uma automação sozinha, abre também uma caixa de diálogo."""
     print(texto)
+    _gravar_log("erro", texto)
     if ALERTAS:
         try:
-            pyautogui.alert(text=texto, title=titulo, button="OK") # type: ignore
+            pyautogui.alert(text=texto, title=titulo, button="OK")  # type: ignore
         except Exception:
             pass
 
@@ -67,7 +124,7 @@ def erro(texto, titulo="Erro"):
 def fim_da_execucao():
     if ALERTAS:
         try:
-            pyautogui.alert(text="Fim da execucao", title="", button="OK") # type: ignore
+            pyautogui.alert(text="Fim da execução", title="Jarvis", button="OK")  # type: ignore
         except Exception:
             pass
 
@@ -86,8 +143,12 @@ def _nome_acao(acao):
 
 
 def executar_plano(plano):
-    """Imprime a resposta, espera ATRASO_APOS_RESPOSTA s e executa a ação."""
+    """Mostra a resposta, espera ATRASO_APOS_RESPOSTA s e executa a ação (se houver).
+
+    Retorna True se a ação deu certo; False se falhou ou se não havia ação.
+    """
     print(plano.resposta)
+    _gravar_log("resposta", plano.resposta)
     if plano.acao is None:
         return False
     time.sleep(ATRASO_APOS_RESPOSTA)
@@ -101,7 +162,10 @@ def executar_plano(plano):
 
 
 def rodar_isolado(planejar):
-    """Para `python calc.py calcule 5 vezes 2`: usa os argumentos como a frase falada."""
+    """Para testar uma automação sozinha, a partir da pasta do projeto:
+        python -m automacao.calc calcule 5 vezes 2
+    Os argumentos viram a frase falada; erros também aparecem em caixas de diálogo.
+    """
     global ALERTAS
     ALERTAS = True
     frase = " ".join(sys.argv[1:])
@@ -128,8 +192,8 @@ def liberar_teclas():
 def seguro(descricao):
     """Captura os erros possíveis da automação, mostra uma mensagem clara e devolve False.
 
-    A ordem dos except importa: FailSafeException e ImageNotFoundException são
-    subclasses de PyAutoGUIException. KeyboardInterrupt (Ctrl+C) não é capturado.
+    A ordem dos except importa: FailSafeException e ImageNotFoundException são subclasses
+    de PyAutoGUIException. KeyboardInterrupt (CTRL+C) não é capturado.
     """
     def decorador(funcao):
         @functools.wraps(funcao)
@@ -144,13 +208,16 @@ def seguro(descricao):
                 erro(f"Não encontrei na tela a imagem necessária para {descricao}.")
             except pyautogui.PyAutoGUIException as e:
                 liberar_teclas()
+                log_excecao(f"Erro do PyAutoGUI ao {descricao}")
                 erro(f"O PyAutoGUI não conseguiu {descricao}: {e}\n"
                      "(Se a mensagem fala de PyScreeze/Pillow, rode: pip install -r requirements.txt)")
             except OSError as e:
                 liberar_teclas()
+                log_excecao(f"Erro de sistema ao {descricao}")
                 erro(f"Erro de arquivo ou sistema ao {descricao}: {e}")
             except Exception as e:
                 liberar_teclas()
+                log_excecao(f"Erro inesperado ao {descricao}")
                 erro(f"Erro inesperado ao {descricao}: {type(e).__name__}: {e}")
             return False
         return wrapper
@@ -166,7 +233,7 @@ def simplificar(texto):
     """
     texto = unicodedata.normalize("NFKC", texto or "")
     texto = "".join(c for c in texto if c not in "​‌‍⁠﻿")
-    texto = re.sub(r"[‐-―−]", "-", texto)
+    texto = re.sub(r"[‐-―−]", "-", texto)      # hífens e traços diversos -> "-"
     texto = unicodedata.normalize("NFD", texto)
     texto = "".join(c for c in texto if not unicodedata.combining(c))
     return re.sub(r"\s+", " ", texto).strip().lower()
@@ -181,7 +248,7 @@ def mencionou(frase, *palavras):
 def titulo_janela():
     """Título da janela ativa (vazio se não for possível obter)."""
     try:
-        return pyautogui.getActiveWindowTitle() or "" # type: ignore
+        return pyautogui.getActiveWindowTitle() or ""  # type: ignore
     except Exception:
         return ""
 
@@ -219,6 +286,7 @@ def aguardar_titulo(condicao, timeout=10, intervalo=0.5):
 
 
 def tem_internet(timeout=3):
+    """True se conseguir abrir uma conexão com o Google."""
     try:
         socket.create_connection(("www.google.com", 443), timeout=timeout).close()
         return True
@@ -228,15 +296,27 @@ def tem_internet(timeout=3):
 
 # ---------------------------------------------------------------- abrir programas
 
-def iniciar_programa(busca, condicao_janela, nome, timeout=20):
-    """Abre um programa pelo menu Iniciar e espera a janela dele ficar ativa."""
+def iniciar_programa(busca, condicao_janela, nome, timeout=20, evitar=None):
+    """Abre um programa pelo menu Iniciar e espera a janela dele ficar ativa.
+
+    evitar: título (simplificado) de uma janela do mesmo programa que já estava na frente antes.
+    Enquanto ela continuar na frente, não conta como "abriu" (senão o Jarvis digitaria num
+    documento que já existia em vez de no novo).
+    """
     log(f'Abrindo "{nome}" pelo menu Iniciar (busca: "{busca}").')
     pyautogui.press("win")
     time.sleep(ESPERA_MENU_INICIAR)  # sem isso as primeiras letras se perdem
     pyautogui.write(busca, interval=0.2)
+    time.sleep(ESPERA_RESULTADO_BUSCA)
     pyautogui.press("enter")
 
-    if aguardar_titulo(condicao_janela, timeout):
+    teste = _criar_teste(condicao_janela)
+    if evitar:
+        log(f'Ignorando a janela que já estava aberta: "{evitar}".')
+        condicao = lambda titulo: teste(titulo) and titulo != evitar  # noqa: E731
+    else:
+        condicao = teste
+    if aguardar_titulo(condicao, timeout):
         return True
     erro(f"Não consegui confirmar que o {nome} abriu (esperei {timeout} s).")
     return False
@@ -294,21 +374,33 @@ def _eh_edge(titulo):
     return titulo.endswith("microsoft edge")
 
 
-def _abrir_por_atalho(url, titulo_esperado):
-    """Método principal: Ctrl+L foca a barra de endereço do Edge."""
+def _teste_site_carregou(url, titulo_esperado):
+    """O título da aba tem o trecho esperado E não é só o endereço digitado.
+
+    Enquanto carrega, quando o endereço não existe ou quando vira uma busca no Bing, o Edge
+    mostra o próprio endereço no título ("youtube.com", "cnnbrasil.com.br - Pesquisar"), que
+    também contém o trecho esperado ("youtube", "cnn"). Esses títulos não contam.
+    """
+    dominio = simplificar(url.split("/")[0])
+    tem_trecho = _criar_teste(titulo_esperado)
+    return lambda titulo: tem_trecho(titulo) and dominio not in titulo
+
+
+def _abrir_por_atalho(url, carregou):
+    """Método principal: CTRL+L foca a barra de endereço do Edge."""
     pyautogui.hotkey("ctrl", "l")
     pyautogui.write(url, interval=0.1)
     pyautogui.press("enter")
-    return aguardar_titulo(titulo_esperado)
+    return aguardar_titulo(carregou)
 
 
-def _abrir_por_imagem(url, titulo_esperado):
-    """Fallback: clica na barra de endereço reconhecendo a imagem dela."""
+def _abrir_por_imagem(url, carregou):
+    """Alternativa: clica na barra de endereço reconhecendo a imagem dela."""
     if not encontrar_e_clicar(IMAGENS_BARRA):
         return False
     pyautogui.write(url, interval=0.1)
     pyautogui.press("enter")
-    return aguardar_titulo(titulo_esperado)
+    return aguardar_titulo(carregou)
 
 
 @seguro("abrir o site no Edge")
@@ -318,11 +410,14 @@ def abrir_site(url, titulo_esperado, pos_abertura=None):
         erro("Sem conexão com a internet: não consigo abrir o site.")
         return False
 
+    carregou = _teste_site_carregou(url, titulo_esperado)
+
     # --- Abrir o Edge ---
     log(f"Abrindo o Edge para carregar {url}.")
     pyautogui.press("win")
     time.sleep(ESPERA_MENU_INICIAR)
     pyautogui.write("edge", interval=0.2)
+    time.sleep(ESPERA_RESULTADO_BUSCA)
     pyautogui.press("enter")
 
     # Espera a janela do Edge ficar ativa (até 10 s)
@@ -331,12 +426,12 @@ def abrir_site(url, titulo_esperado, pos_abertura=None):
     time.sleep(1)
 
     # --- Abrir o site ---
-    log("Tentando com Ctrl+L...")
-    if _abrir_por_atalho(url, titulo_esperado):
+    log("Tentando com CTRL+L...")
+    if _abrir_por_atalho(url, carregou):
         log("Site aberto com o atalho.")
     else:
         log("Atalho não funcionou. Tentando por reconhecimento de imagem...")
-        if _abrir_por_imagem(url, titulo_esperado):
+        if _abrir_por_imagem(url, carregou):
             log("Site aberto com a imagem.")
         else:
             erro("Não consegui abrir o site.")

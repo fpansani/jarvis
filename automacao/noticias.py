@@ -1,10 +1,15 @@
+"""Notícias: abre o site da CNN Brasil no Edge.
+
+"jarvis, abra a CNN Brasil."                                       -> resposta curta
+"jarvis, eu quero ver notícias." / "me mostre as notícias do dia."  -> resposta longa
+
+Testar sozinho (da pasta do projeto):  python -m automacao.noticias me mostre as notícias do dia
+"""
 from .comum import Plano, abrir_site, mencionou, rodar_isolado
 
 URL = "cnnbrasil.com.br"
 TITULO_ESPERADO = "CNN"  # trecho do título da aba quando o site carrega
 
-# "jarvis, abra a CNN Brasil."                              -> resposta curta
-# "jarvis, eu quero ver notícias." / "me mostre as notícias do dia."  -> resposta longa
 RESPOSTA_ABRIR = "Certo, irei abrir o site da CNN Brasil no seu navegador."
 RESPOSTA_NOTICIAS = ("Certo, irei abrir o site da CNN Brasil no seu navegador "
                      "para você ver as notícias atuais.")
@@ -20,5 +25,4 @@ def planejar(frase=""):
 
 
 if __name__ == "__main__":
-    # python noticias.py me mostre as notícias do dia
     rodar_isolado(planejar)

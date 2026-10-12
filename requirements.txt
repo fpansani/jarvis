@@ -1,18 +1,18 @@
-# Jarvis - dependencies
-# Tested on Python 3.13.0 (Windows). Install inside a .venv (see README.md).
+# Jarvis - dependências
+# Testado no Python 3.13.0 (Windows 10). Instale dentro de um .venv (veja o README.md).
 
 PyAudio==0.2.14
 SpeechRecognition==3.17.0
 PyAutoGUI==0.9.54
 requests==2.34.2
 
-# Offline speech recognition (used when there is no internet). Needs a model in models/ (see README.md).
+# Reconhecimento de voz offline (usado sem internet). Precisa de um modelo em models/ (veja o README.md).
 vosk==0.3.45
 
-# Keyboard activation (global CTRL+ALT+J hotkey, works with any window in focus).
+# Atalhos globais de teclado (CTRL+ALT+J e CTRL+ALT+NUM 0-9), com qualquer janela na frente.
 pynput==1.8.2
 
-# Needed by PyAutoGUI's image recognition (locateOnScreen / doubleClick('img.png')).
-# PyScreeze does not install Pillow on Python 3.12+, and "confidence=" requires OpenCV.
+# Reconhecimento de imagens do PyAutoGUI (locateOnScreen). O PyScreeze não instala o Pillow
+# no Python 3.12+, e o "confidence=" precisa do OpenCV.
 Pillow==12.3.0
 opencv-python==4.14.0.94

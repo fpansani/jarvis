@@ -1,10 +1,15 @@
+"""YouTube: abre o site no Edge.
+
+"jarvis, abra o youtube."          -> resposta curta
+"jarvis, eu queria ver vídeos."    -> resposta longa
+
+Testar sozinho (da pasta do projeto):  python -m automacao.youtube abra o youtube
+"""
 from .comum import Plano, abrir_site, mencionou, rodar_isolado
 
 URL = "youtube.com"
 TITULO_ESPERADO = "YouTube"  # trecho do título da aba quando o site carrega
 
-# "jarvis, abra o youtube."          -> resposta curta
-# "jarvis, eu queria ver vídeos."    -> resposta longa
 RESPOSTA_ABRIR = "Certo, irei abrir o YouTube no navegador."
 RESPOSTA_VER_VIDEOS = "Certo, irei abrir o YouTube no navegador para você poder assistir vídeos."
 
@@ -19,5 +24,4 @@ def planejar(frase=""):
 
 
 if __name__ == "__main__":
-    # python youtube.py abra o youtube
     rodar_isolado(planejar)

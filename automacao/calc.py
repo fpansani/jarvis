@@ -1,3 +1,11 @@
+"""Calculadora: responde contas faladas e, se pedido, digita a conta na Calculadora do Windows.
+
+"jarvis, abra a calculadora"                  -> só abre a calculadora
+"jarvis, calcule 5 vezes 2" / "faça 2 x 2" / "faz 2 x 2 pra mim" -> só responde o resultado
+"jarvis, calcule 5 vezes 2 na calculadora"    -> responde, abre a calculadora e digita a conta
+
+Testar sozinho (da pasta do projeto):  python -m automacao.calc calcule 5 vezes 2 na calculadora
+"""
 import re
 import time
 from decimal import Decimal
@@ -5,13 +13,18 @@ from typing import NamedTuple
 
 import pyautogui
 
-from .comum import (Plano, erro, janela_ativa_eh, iniciar_programa, log, rodar_isolado,
-                   mencionou, seguro, simplificar)
+from .comum import (Plano, erro, iniciar_programa, janela_ativa_eh, log, mencionou,
+                    rodar_isolado, seguro, simplificar)
 
-# "jarvis, abra a calculadora"                  -> só abre a calculadora
-# "jarvis, calcule 5 vezes 2"                   -> só responde o resultado (não abre nada)
-# "jarvis, calcule 5 vezes 2 na calculadora"    -> responde, abre a calculadora e digita a conta
 RESPOSTA_ABRIR = "Certo, irei abrir a calculadora."
+RESPOSTA_SEM_CONTA = "Qual conta você quer que eu faça? Diga, por exemplo: calcule 5 vezes 2."
+RESPOSTA_SEM_COMANDO = "Desculpe, não entendi o comando."
+
+# Verbos que pedem uma conta ("calcule 5 vezes 2", "faça 2 x 2", "faz 2 x 2"), já sem acento.
+# "faça" e "faz" também aparecem em frases que não são contas ("faça uma saudação", "faz frio"):
+# para eles, uma frase sem número E operação não é tratada como conta.
+VERBOS_CONTA = r"\b(?:calcul(?:ar|e|a)|faca|faz)\b"
+VERBOS_GENERICOS = ("faca", "faz")
 
 UNIDADES = {
     "zero": 0, "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4,
@@ -33,7 +46,7 @@ CENTENAS = {
 
 OPERADORES = {"mais": "+", "menos": "-", "vezes": "*", "x": "*"}
 PALAVRA_OPERADOR = {"+": "mais", "-": "menos", "*": "vezes", "/": "dividido por"}
-# Teclas do teclado numérico: funcionam em qualquer layout (ABNT2 não digita "/" direto)
+# Teclas do teclado numérico: funcionam em qualquer layout (no ABNT2 a "/" não sai direto)
 TECLAS = {"+": "add", "-": "subtract", "*": "multiply", "/": "divide", ".": "decimal"}
 
 MAX_DIGITOS = 15
@@ -54,9 +67,9 @@ class Conta(NamedTuple):
 # ---------------------------------------------------------------- interpretar a conta
 
 def _ler_numero(tokens, i):
-    """Lê um número por extenso (0 a 999) a partir de tokens[i]. Retorna (valor, qtd_tokens)."""
+    """Lê um número por extenso de 0 a 999 a partir de tokens[i]. Retorna (valor, qtd_tokens)."""
     n = len(tokens)
-    tok = lambda k: tokens[k] if k < n else None
+    tok = lambda k: tokens[k] if k < n else None  # noqa: E731
     j, total, consumiu = i, 0, False
 
     if tok(j) in CENTENAS:
@@ -87,10 +100,27 @@ def _ler_numero(tokens, i):
     return (total, j - i) if consumiu else (0, 0)
 
 
+def _ler_numero_com_mil(tokens, i):
+    """Como _ler_numero, mas aceita milhares: "mil", "dois mil", "mil e duzentos", "três mil cento e dez"."""
+    valor, usados = _ler_numero(tokens, i)
+    j = i + usados
+    if j >= len(tokens) or tokens[j] != "mil":
+        return valor, usados
+
+    milhares = valor if usados else 1                   # "mil" sozinho = 1000
+    j += 1
+    inicio_resto = j + 1 if j < len(tokens) and tokens[j] == "e" else j
+    resto, usados_resto = _ler_numero(tokens, inicio_resto)
+    if usados_resto:
+        j = inicio_resto + usados_resto
+    return milhares * 1000 + resto, j - i
+
+
 def _palavras_para_numeros(tokens):
+    """["dois", "mil", "mais", "tres"] -> ["2000", "mais", "3"]."""
     saida, i = [], 0
     while i < len(tokens):
-        valor, usados = _ler_numero(tokens, i)
+        valor, usados = _ler_numero_com_mil(tokens, i)
         if usados:
             saida.append(str(valor))
             i += usados
@@ -100,15 +130,30 @@ def _palavras_para_numeros(tokens):
     return saida
 
 
+def _juntar_virgula(tokens):
+    """["2", "virgula", "5"] -> ["2.5"] (o Vosk escreve "dois vírgula cinco")."""
+    saida = []
+    for tok in tokens:
+        if (len(saida) >= 2 and saida[-1] == "virgula" and saida[-2].isdigit() and tok.isdigit()):
+            saida[-2:] = [f"{saida[-2]}.{tok}"]
+        else:
+            saida.append(tok)
+    return saida
+
+
 def extrair_conta(frase):
     """Tira da frase o trecho da conta: 'eu queria calcular 5 vezes 2' -> '5 vezes 2'."""
     f = simplificar(frase)
-    m = re.search(r"\bcalcul(?:ar|e|a)\b\s*(.*)$", f)
+    m = re.search(VERBOS_CONTA + r"\s*(.*)$", f)
     conta = m.group(1) if m else f
-    conta = re.sub(r"\b(?:na|pela|usando a|com a)\s+calculadora\b", " ", conta)   # "... na calculadora"
-    conta = re.sub(r"^\s*(?:a conta|o resultado de|quanto e)\s+", "", conta)
-    conta = re.sub(r"\s*por favor$", "", conta)
-    return conta.strip(" ?!.")
+    # "... e abra a calculadora", "... na calculadora", "... usando a calculadora"
+    conta = re.sub(r"\b(?:e\s+)?(?:abra|abre|abrir|mostre|mostra)\s+(?:a|na)\s+calculadora\b", " ", conta)
+    conta = re.sub(r"\b(?:na|pela|usando a|com a)\s+calculadora\b", " ", conta)
+    # "faça a conta de 2 x 2", "calcule o resultado de...", "quanto é..."
+    conta = re.sub(r"^\s*(?:(?:pra|para) mim|por favor)\s+", "", conta)                 # "faz pra mim 2 x 2"
+    conta = re.sub(r"^\s*(?:a conta|o resultado|o calculo|a operacao|quanto e)(?:\s+de)?\s+", "", conta)
+    conta = re.sub(r"(?:\s*(?:por favor|(?:pra|para) mim))+$", "", conta)               # "... pra mim"
+    return conta.strip(" ?!.,")
 
 
 def _formatar(valor):
@@ -130,7 +175,7 @@ def avaliar_conta(texto):
     t = re.sub(r"(?<=\d)x(?=\d)", " * ", t)               # 5x2
     t = re.sub(r"([+\-*/])", r" \1 ", t)
 
-    tokens = _palavras_para_numeros(t.split())
+    tokens = _juntar_virgula(_palavras_para_numeros(t.split()))
     tokens = [OPERADORES.get(tok, tok) for tok in tokens]
 
     padrao = r"\d+(?:\.\d+)?"
@@ -188,6 +233,7 @@ def digitar_conta(conta):
     if conta.precisa_precedencia:
         # O modo Padrão calcula na ordem digitada (2+3*4 = 20); o Científico respeita
         # a precedência (= 14), igual ao resultado que o Jarvis anuncia.
+        log("Conta mistura + - com * /: mudando a calculadora para o modo Científico (ALT+2).")
         pyautogui.hotkey("alt", "2")
         time.sleep(0.5)
 
@@ -205,25 +251,50 @@ def digitar_conta(conta):
 
 # ---------------------------------------------------------------- plano
 
+def _parece_conta(trecho):
+    """True se o trecho tem um número E uma operação ("2 x 2", "dois mais três").
+
+    Só número não basta: "uma saudação" tem "uma" (= 1), mas não é conta.
+    """
+    t = simplificar(trecho)
+    tokens = _palavras_para_numeros(t.split())
+    tem_numero = any(re.search(r"\d", tok) for tok in tokens)
+    tem_operacao = (any(tok in OPERADORES for tok in tokens)
+                    or re.search(r"[+\-*/×÷]|\d\s*x\s*\d|dividido por|multiplicado por", t) is not None)
+    return tem_numero and tem_operacao
+
+
 def planejar(frase=""):
-    if re.search(r"\bcalcul(?:ar|e|a)\b", simplificar(frase)):
-        trecho = extrair_conta(frase)
-        try:
-            conta = avaliar_conta(trecho)
-        except ContaInvalida as e:
-            log(f'Conta não entendida em "{trecho}": {e}')
-            return Plano(str(e))
-        log(f'Conta: "{trecho}" -> {" ".join(conta.tokens)} = {conta.resultado}'
-            + (" (precisa de precedência: modo Científico)" if conta.precisa_precedencia else ""))
-        resposta = f"O resultado de {conta.exibicao} é {conta.resultado}."
-        if mencionou(frase, "calculadora"):
-            return Plano(resposta, lambda: digitar_conta(conta))   # pediu a calculadora: digita lá
-        return Plano(resposta)                                      # só responde, sem abrir nada
-    return Plano(RESPOSTA_ABRIR, abrir_calculadora)
+    pediu_calculadora = mencionou(frase, "calculadora")
+    verbo = re.search(VERBOS_CONTA, simplificar(frase))
+    if not verbo:
+        return Plano(RESPOSTA_ABRIR, abrir_calculadora)
+
+    trecho = extrair_conta(frase)
+    if not trecho:
+        # "abra a calculadora para eu calcular": sem conta na frase
+        log("Pediu para calcular, mas a frase não tem conta.")
+        if pediu_calculadora:
+            return Plano(RESPOSTA_ABRIR, abrir_calculadora)
+        return Plano(RESPOSTA_SEM_CONTA)
+
+    try:
+        conta = avaliar_conta(trecho)
+    except ContaInvalida as e:
+        log(f'Conta não entendida em "{trecho}": {e}')
+        if verbo.group(0) in VERBOS_GENERICOS and not pediu_calculadora and not _parece_conta(trecho):
+            # "faça uma saudação", "faz frio": não era uma conta, então a resposta não fala de contas
+            log(f'"{verbo.group(0)}" sem número e operação: não parece uma conta.')
+            return Plano(RESPOSTA_SEM_COMANDO)
+        return Plano(str(e))
+    log(f'Conta: "{trecho}" -> {" ".join(conta.tokens)} = {conta.resultado}'
+        + (" (precisa de precedência: modo Científico)" if conta.precisa_precedencia else ""))
+
+    resposta = f"O resultado de {conta.exibicao} é {conta.resultado}."
+    if pediu_calculadora:
+        return Plano(resposta, lambda: digitar_conta(conta))   # pediu a calculadora: digita lá
+    return Plano(resposta)                                      # só responde, sem abrir nada
 
 
 if __name__ == "__main__":
-    # python calc.py abra a calculadora
-    # python calc.py calcule 5 vezes 2
-    # python calc.py calcule 5 vezes 2 na calculadora
     rodar_isolado(planejar)

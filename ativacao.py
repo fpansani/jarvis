@@ -20,7 +20,6 @@ import time
 from automacao.comum import log
 
 ATALHO = "<ctrl>+<alt>+j"   # formato do pynput: "<ctrl>+<shift>+k", "<f9>", "<pause>"...
-NOME_ATALHO = "CTRL+ALT+J"  # como o atalho aparece na tela
 
 TEMPO_PARA_INICIAR = 3      # segundos esperando o gancho do teclado ficar pronto
 
@@ -29,7 +28,8 @@ OUVIR = "ouvir"             # (OUVIR, None)
 FRASE = "frase"             # (FRASE, número do teclado numérico)
 
 # ---------------------------------------------------------------- teclado numérico (Windows)
-_VK_CONTROL, _VK_MENU = 0x11, 0x12
+_VK_SHIFT, _VK_CONTROL, _VK_MENU = 0x10, 0x11, 0x12
+_VK_DOS_MODIFICADORES = {"<shift>": _VK_SHIFT, "<ctrl>": _VK_CONTROL, "<alt>": _VK_MENU}
 _VK_NUMPAD = {0x60 + n: n for n in range(10)}            # NumLock ligado: VK_NUMPAD0..9
 # NumLock desligado: o teclado numérico manda as teclas de navegação, mas sem a marca
 # "estendida" (as setas/Home/End separadas do teclado têm essa marca).
@@ -46,6 +46,14 @@ _WM_TECLA_SOBE = (0x0101, 0x0105)                         # WM_KEYUP, WM_SYSKEYU
 _VK_MASCARA = 0xE8
 
 
+def nome_do_atalho(atalho):
+    """Como o atalho aparece na tela: "<ctrl>+<alt>+j" -> "CTRL+ALT+J"."""
+    return "+".join(parte.strip("<>").upper() for parte in atalho.split("+"))
+
+
+NOME_ATALHO = nome_do_atalho(ATALHO)
+
+
 def nome_atalho_numerico(numero):
     return f"CTRL+ALT+NUM {numero}"
 
@@ -59,10 +67,18 @@ def digito_do_teclado_numerico(vk, flags):
     return None
 
 
+def _teclas_apertadas(*vks):
+    """Todas essas teclas estão apertadas agora, segundo o Windows? (fora do Windows: True)"""
+    try:
+        import ctypes
+        estado = ctypes.windll.user32.GetAsyncKeyState
+    except (ImportError, AttributeError):
+        return True
+    return all(estado(vk) & 0x8000 for vk in vks)
+
+
 def _ctrl_e_alt_apertados():
-    import ctypes
-    estado = ctypes.windll.user32.GetAsyncKeyState
-    return bool(estado(_VK_CONTROL) & 0x8000) and bool(estado(_VK_MENU) & 0x8000)
+    return _teclas_apertadas(_VK_CONTROL, _VK_MENU)
 
 
 def _apertar_mascara():
@@ -90,8 +106,13 @@ class AtalhoGlobal:
         self._ouvindo = False
         self.cancelar = threading.Event()   # ativado por CTRL+ALT+J durante a escuta
 
+        # modificadores do atalho de ouvir ("<ctrl>+<alt>+j" -> CTRL e ALT), conferidos a cada uso
+        self._vks_do_atalho = [_VK_DOS_MODIFICADORES[p] for p in atalho.lower().split("+")
+                               if p in _VK_DOS_MODIFICADORES]
+
         # dá para trocar nos testes (fora do Windows)
         self._ctrl_e_alt = _ctrl_e_alt_apertados
+        self._modificadores_apertados = lambda: _teclas_apertadas(*self._vks_do_atalho)
         self._mascara = _apertar_mascara
 
     def iniciar(self):
@@ -99,7 +120,8 @@ class AtalhoGlobal:
         try:
             from pynput import keyboard
         except ImportError as e:
-            raise ErroAtalho("O pacote 'pynput' não está instalado (pip install -r requirements.txt).") from e
+            log(f"Falha ao importar o pynput: {e}")
+            raise ErroAtalho("Não consegui carregar o pacote 'pynput' (pip install -r requirements.txt).") from e
 
         try:
             self._ouvinte = keyboard.GlobalHotKeys(
@@ -123,6 +145,13 @@ class AtalhoGlobal:
     # (o Windows desliga ganchos lentos), então só registra o evento e volta.
 
     def _apertou_ouvir(self):
+        # O pynput guarda sozinho quais teclas estão apertadas. Se ele perder o "soltar" do CTRL
+        # ou do ALT (CTRL+ALT+DEL, janela de administrador...), um J sozinho dispararia o atalho;
+        # por isso confere no Windows se os modificadores estão mesmo apertados.
+        if not self._modificadores_apertados():
+            log(f"{nome_do_atalho(self.atalho)} ignorado: os modificadores não estão apertados "
+                "(estado preso no pynput).")
+            return
         if self._ouvindo:
             self.cancelar.set()             # já está ouvindo: o mesmo atalho cancela
         else:
@@ -141,7 +170,7 @@ class AtalhoGlobal:
 
         if msg in _WM_TECLA_DESCE:
             if data.vkCode in self._seguradas:            # repetição automática da tecla segurada
-                self._ouvinte.suppress_event()
+                self._ouvinte.suppress_event()            # (bloqueia e sai: levanta uma exceção)
             if not self._ctrl_e_alt():
                 return True                               # número sem CTRL+ALT: segue normal
             self._seguradas.add(data.vkCode)

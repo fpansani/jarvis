@@ -1,3 +1,12 @@
+"""Reconhecimento de voz do Jarvis.
+
+- Online: Google (SpeechRecognition), em português.
+- Offline: Vosk, com um modelo na pasta models/. Usado quando não há internet ao abrir o Jarvis
+  ou quando o Google falha no meio do uso.
+- A escuta pode ser cancelada no meio (CTRL+ALT+J de novo; veja ativacao.py).
+"""
+import contextlib
+import http.client
 import json
 import os
 import time
@@ -5,8 +14,7 @@ from pathlib import Path
 
 import speech_recognition as sr
 
-from automacao import comum
-from automacao.comum import log
+from automacao.comum import log, log_excecao
 
 # Reconhecimento offline (Vosk): o modelo fica na pasta models/, ao lado deste arquivo.
 PASTA_MODELOS = Path(__file__).resolve().parent / "models"
@@ -14,14 +22,23 @@ VARIAVEL_MODELO = "JARVIS_MODELO_VOSK"   # opcional: escolhe o modelo quando hou
 TAXA_VOSK = 16000                        # taxa de amostragem (Hz) usada pelos modelos do Vosk
 
 ESPERA_PELA_FALA = 10                    # segundos esperando você começar a falar
+DURACAO_MAXIMA_FALA = 15                 # segundos no máximo de uma frase
 TEMPO_LIMITE_GOOGLE = 5                  # segundos esperando o Google antes de desistir
 SEGUNDOS_OFFLINE = 30                    # depois de uma falha, usa o Vosk por este tempo antes de tentar o Google
+
+# Erros que significam "o Google não respondeu direito": sem conexão, tempo esgotado, ou uma
+# resposta que não é do Google (por exemplo, a página de login do Wi-Fi da escola, em HTML).
+ERROS_DO_GOOGLE = (sr.RequestError, OSError, ValueError, KeyError, http.client.HTTPException)
 
 MENSAGEM_SEM_MODELO = """Nenhum modelo do Vosk encontrado na pasta models/.
   1. Baixe um modelo em português em https://alphacephei.com/vosk/models
   2. Descompacte dentro da pasta models/ (ao lado do main.py), ficando por exemplo:
      models/vosk-model-pt-fb-v0.1.1-pruned/
   3. Rode o Jarvis de novo."""
+
+MENSAGEM_MICROFONE_BLOQUEADO = (
+    "não consegui abrir o microfone. Ele pode estar em uso por outro programa ou bloqueado em "
+    "Configurações > Privacidade > Microfone (permita o acesso de aplicativos da área de trabalho).")
 
 _usar_google_a_partir_de = 0.0   # enquanto o relógio estiver abaixo disso, usa só o Vosk
 _avisou_offline = False          # evita repetir o aviso "usando o reconhecimento offline"
@@ -35,6 +52,8 @@ class ErroModelo(Exception):
 class EscutaCancelada(Exception):
     """A escuta foi cancelada (por exemplo, CTRL+ALT+J apertado de novo)."""
 
+
+# ---------------------------------------------------------------- microfone
 
 class _MicrofoneCancelavel:
     """Envolve o stream do microfone: a cada pedaço lido (uns 20 a 60 ms), confere se a escuta
@@ -54,31 +73,62 @@ class _MicrofoneCancelavel:
         self._stream.close()
 
 
-def calibrar_microfone(segundos=1):
-    """Mede o ruído do ambiente uma vez, para não gastar 1 s calibrando a cada frase.
+@contextlib.contextmanager
+def _abrir_microfone(cancelar=None):
+    """Abre o microfone padrão. Levanta OSError com uma mensagem clara se não conseguir.
 
-    O limiar continua se ajustando sozinho durante o uso (dynamic_energy_threshold).
+    O SpeechRecognition engole o erro quando o PyAudio não consegue abrir o microfone (em uso
+    por outro programa, bloqueado na privacidade do Windows) e deixa o stream vazio, o que
+    depois virava um erro confuso. Aqui isso vira um OSError com a explicação.
     """
-    global _limiar_energia
-    recognition = sr.Recognizer()
-    with sr.Microphone() as microfone:
-        recognition.adjust_for_ambient_noise(microfone, duration=segundos)
-    _limiar_energia = recognition.energy_threshold
-    log(f"Limiar de energia do microfone: {_limiar_energia:.0f}")
-    return _limiar_energia
+    try:
+        microfone = sr.Microphone()
+    except AttributeError as e:          # o SpeechRecognition faz isso quando falta o PyAudio
+        raise OSError("o PyAudio não está instalado (pip install -r requirements.txt)") from e
+    microfone.__enter__()
+    if microfone.stream is None:
+        raise OSError(MENSAGEM_MICROFONE_BLOQUEADO)
+    try:
+        if cancelar is not None:
+            microfone.stream = _MicrofoneCancelavel(microfone.stream, cancelar)
+        yield microfone
+    finally:
+        microfone.__exit__(None, None, None)
 
 
 def find_microphone():
     """Retorna o nome do microfone padrão, ou None se não houver nenhum."""
-    import pyaudio
+    try:
+        import pyaudio
+    except ImportError:
+        log("PyAudio não instalado.")
+        return None
 
     audio = pyaudio.PyAudio()
     try:
-        return audio.get_default_input_device_info()["name"]
+        info = audio.get_default_input_device_info()
+        log(f"Microfone padrão: {info.get('name')} (índice {info.get('index')}, "
+            f"{info.get('defaultSampleRate', 0):.0f} Hz, {audio.get_device_count()} dispositivo(s) de áudio)")
+        return info["name"]
     except OSError:
         return None
     finally:
         audio.terminate()
+
+
+def calibrar_microfone(segundos=1):
+    """Mede o ruído do ambiente uma vez, para não gastar 1 s calibrando a cada frase.
+
+    O limiar continua se ajustando sozinho durante o uso (dynamic_energy_threshold).
+    Levanta OSError se o microfone não abrir.
+    """
+    global _limiar_energia
+    recognition = sr.Recognizer()
+    with _abrir_microfone() as microfone:
+        recognition.adjust_for_ambient_noise(microfone, duration=segundos)
+    _limiar_energia = recognition.energy_threshold
+    log(f"Limiar de energia do microfone: {_limiar_energia:.0f} (quanto maior, mais barulhento o ambiente).")
+    return _limiar_energia
 
 
 # ---------------------------------------------------------------- modelo offline (Vosk)
@@ -174,15 +224,22 @@ class ReconhecedorOffline:
         try:
             from vosk import Model, SetLogLevel
         except ImportError as e:
-            self.erro = "O pacote 'vosk' não está instalado. Rode: pip install vosk"
+            self.erro = "O pacote 'vosk' não está instalado. Rode: pip install -r requirements.txt"
             raise ErroModelo(self.erro) from e
 
         SetLogLevel(-1)  # silencia o log interno do Vosk (erros graves ainda aparecem)
         try:
             self._modelo = Model(str(self.pasta))
         except Exception as e:  # o Vosk só levanta Exception("Failed to create a model")
-            self.erro = (f"Não consegui carregar o modelo '{self.nome}'. Os arquivos podem estar "
-                         "incompletos (baixe e descompacte de novo) ou faltar memória no computador.")
+            log_excecao(f"Falha ao carregar o modelo do Vosk em {self.pasta}")
+            if not str(self.pasta.resolve()).isascii():
+                self.erro = (f"Não consegui carregar o modelo '{self.nome}'. O caminho tem acentos ou "
+                             f"caracteres especiais ({self.pasta.resolve()}), que o Vosk pode não aceitar "
+                             "no Windows: mova a pasta do Jarvis (ou só o modelo) para um caminho simples, "
+                             f"como C:\\jarvis, ou indique o modelo com {VARIAVEL_MODELO}.")
+            else:
+                self.erro = (f"Não consegui carregar o modelo '{self.nome}'. Os arquivos podem estar "
+                             "incompletos (baixe e descompacte de novo) ou faltar memória no computador.")
             raise ErroModelo(self.erro) from e
 
     def transcrever(self, audio):
@@ -190,10 +247,14 @@ class ReconhecedorOffline:
         self.carregar()
         from vosk import KaldiRecognizer
 
-        reconhecedor = KaldiRecognizer(self._modelo, TAXA_VOSK)
-        # o SpeechRecognition converte o áudio do microfone para 16 kHz, 16 bits
-        reconhecedor.AcceptWaveform(audio.get_raw_data(convert_rate=TAXA_VOSK, convert_width=2))
-        texto = json.loads(reconhecedor.FinalResult()).get("text", "").strip()
+        try:
+            reconhecedor = KaldiRecognizer(self._modelo, TAXA_VOSK)
+            # o SpeechRecognition converte o áudio do microfone para 16 kHz, 16 bits
+            reconhecedor.AcceptWaveform(audio.get_raw_data(convert_rate=TAXA_VOSK, convert_width=2))
+            texto = json.loads(reconhecedor.FinalResult()).get("text", "").strip()
+        except Exception as e:
+            log_excecao("Falha do Vosk ao reconhecer a fala")
+            raise ErroModelo(f"O reconhecimento offline falhou: {type(e).__name__}: {e}") from e
         return texto or None
 
 
@@ -210,102 +271,96 @@ def _aviso_padrao(mensagem):
     print(f"\r{mensagem}")
 
 
-def _debug(avisar, mensagem):
-    """Debug durante a escuta: passa pelo 'avisar' para não bagunçar o prompt "> "."""
-    if comum.DEBUG:
-        avisar(f"[debug] {mensagem}")
-
-
 def _transcrever_offline(offline, audio, avisar):
     try:
         if not offline.carregado:
             avisar(f"Carregando o modelo offline '{offline.nome}'...")
             inicio = time.monotonic()
             offline.carregar()
-            _debug(avisar, f"Modelo carregado em {time.monotonic() - inicio:.1f} s.")
+            log(f"Modelo carregado em {time.monotonic() - inicio:.1f} s.", avisar)
         inicio = time.monotonic()
         texto = offline.transcrever(audio)
     except ErroModelo as e:
         raise sr.RequestError(str(e)) from e
 
     duracao = time.monotonic() - inicio
-    if texto:
-        _debug(avisar, f"Vosk reconheceu em {duracao:.2f} s.")
-    else:
-        _debug(avisar, f"Vosk não entendeu a fala ({duracao:.2f} s).")
+    log(f"Vosk reconheceu em {duracao:.2f} s: {texto!r}" if texto
+        else f"Vosk não entendeu a fala ({duracao:.2f} s).", avisar)
     return texto
 
 
-def SpeechRecognition(offline=None, avisar=_aviso_padrao, cancelar=None):
+def SpeechRecognition(offline=None, avisar=_aviso_padrao, cancelar=None, ao_abrir=None):
     """Escuta uma vez e retorna o texto falado.
 
-    Usa o Google quando há internet. Se o Google falhar (sem conexão, tempo esgotado) e houver um
-    ReconhecedorOffline disponível, a mesma fala é reconhecida pelo Vosk, e o Vosk continua sendo
-    usado por SEGUNDOS_OFFLINE segundos antes de o Google ser tentado de novo.
+    Usa o Google quando há internet. Se o Google falhar (sem conexão, tempo esgotado, resposta
+    inválida) e houver um ReconhecedorOffline disponível, a mesma fala é reconhecida pelo Vosk,
+    e o Vosk continua sendo usado por SEGUNDOS_OFFLINE segundos antes de o Google ser tentado de novo.
 
+    avisar:   função que mostra avisos e mensagens de debug sem bagunçar o prompt "> ".
     cancelar: threading.Event opcional. Se for ativado durante a escuta, ela para na hora; se for
-    ativado durante o reconhecimento, o resultado é descartado. Nos dois casos: EscutaCancelada.
+              ativado durante o reconhecimento, o resultado é descartado. Nos dois casos: EscutaCancelada.
+    ao_abrir: função chamada assim que o microfone estiver aberto, logo antes de ouvir (o bipe e o
+              prompt "> "): assim nada do que você fala depois do bipe se perde.
 
     Retorna None se nenhuma fala foi detectada ou se a fala não foi entendida.
-    Erros do serviço de reconhecimento (sr.RequestError) e do microfone (OSError)
-    são propagados para quem chamou.
+    Levanta sr.RequestError (serviço de reconhecimento) e OSError (microfone).
     """
-    texto = _ouvir_e_reconhecer(offline, avisar, cancelar)
+    texto = _ouvir_e_reconhecer(offline, avisar, cancelar, ao_abrir)
     if cancelar is not None and cancelar.is_set():
         raise EscutaCancelada()
     return texto
 
 
-def _ouvir_e_reconhecer(offline, avisar, cancelar):
+def _ouvir_e_reconhecer(offline, avisar, cancelar, ao_abrir):
     global _usar_google_a_partir_de, _avisou_offline, _limiar_energia
 
     recognition = sr.Recognizer()
     recognition.operation_timeout = TEMPO_LIMITE_GOOGLE
 
-    with sr.Microphone() as microfone:
-        if cancelar is not None:
-            microfone.stream = _MicrofoneCancelavel(microfone.stream, cancelar)
+    with _abrir_microfone(cancelar) as microfone:
         if _limiar_energia is None:
             recognition.adjust_for_ambient_noise(microfone, duration=1)
         else:
             recognition.energy_threshold = _limiar_energia
+        if ao_abrir is not None:
+            ao_abrir()
 
         try:
             audio = recognition.listen(
                 microfone,
                 timeout=ESPERA_PELA_FALA,
-                phrase_time_limit=15
+                phrase_time_limit=DURACAO_MAXIMA_FALA,
             )
         except sr.WaitTimeoutError:
-            _debug(avisar, f"Nenhuma fala em {ESPERA_PELA_FALA} s.")
+            log(f"Nenhuma fala em {ESPERA_PELA_FALA} s.", avisar)
             return None
         finally:
             if _limiar_energia is not None:
                 _limiar_energia = recognition.energy_threshold   # guarda o ajuste feito durante a escuta
 
-    _debug(avisar, f"Áudio capturado: {len(audio.frame_data) / (audio.sample_rate * audio.sample_width):.1f} s.")
+    duracao = len(audio.frame_data) / (audio.sample_rate * audio.sample_width)
+    log(f"Áudio capturado: {duracao:.1f} s (limiar de energia {recognition.energy_threshold:.0f}).", avisar)
     tem_offline = offline is not None and offline.disponivel
 
     agora = time.monotonic()
     if tem_offline and agora < _usar_google_a_partir_de:
-        _debug(avisar, f"Usando o Vosk direto (o Google volta a ser tentado em {_usar_google_a_partir_de - agora:.0f} s).")
+        log(f"Usando o Vosk direto (o Google volta a ser tentado em {_usar_google_a_partir_de - agora:.0f} s).", avisar)
         return _transcrever_offline(offline, audio, avisar)
 
     inicio = time.monotonic()
     try:
-        texto = recognition.recognize_google(
-            audio,
-            language='pt-BR'
-        )
-        _debug(avisar, f"Google reconheceu em {time.monotonic() - inicio:.2f} s.")
+        texto = recognition.recognize_google(audio, language="pt-BR")
+        log(f"Google reconheceu em {time.monotonic() - inicio:.2f} s.", avisar)
         _avisou_offline = False
         return texto
     except sr.UnknownValueError:
-        _debug(avisar, f"Google não entendeu a fala ({time.monotonic() - inicio:.2f} s).")
+        log(f"Google não entendeu a fala ({time.monotonic() - inicio:.2f} s).", avisar)
         _avisou_offline = False
         return None
-    except (sr.RequestError, OSError) as erro:
-        _debug(avisar, f"Google falhou após {time.monotonic() - inicio:.1f} s: {type(erro).__name__}: {erro}")
+    except ERROS_DO_GOOGLE as erro:
+        log(f"Google falhou após {time.monotonic() - inicio:.1f} s: {type(erro).__name__}: {erro}", avisar)
+        if cancelar is not None and cancelar.is_set():
+            raise EscutaCancelada() from erro                 # cancelado: nem tenta o Vosk
         if not tem_offline:
             if isinstance(erro, sr.RequestError):
                 raise
