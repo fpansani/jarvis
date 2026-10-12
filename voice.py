@@ -13,6 +13,7 @@ PASTA_MODELOS = Path(__file__).resolve().parent / "models"
 VARIAVEL_MODELO = "JARVIS_MODELO_VOSK"   # opcional: escolhe o modelo quando houver mais de um
 TAXA_VOSK = 16000                        # taxa de amostragem (Hz) usada pelos modelos do Vosk
 
+ESPERA_PELA_FALA = 10                    # segundos esperando você começar a falar
 TEMPO_LIMITE_GOOGLE = 5                  # segundos esperando o Google antes de desistir
 SEGUNDOS_OFFLINE = 30                    # depois de uma falha, usa o Vosk por este tempo antes de tentar o Google
 
@@ -24,10 +25,25 @@ MENSAGEM_SEM_MODELO = """Nenhum modelo do Vosk encontrado na pasta models/.
 
 _usar_google_a_partir_de = 0.0   # enquanto o relógio estiver abaixo disso, usa só o Vosk
 _avisou_offline = False          # evita repetir o aviso "usando o reconhecimento offline"
+_limiar_energia = None           # volume que separa fala de ruído (medido em calibrar_microfone)
 
 
 class ErroModelo(Exception):
     """O modelo do Vosk não existe, não abriu ou o pacote 'vosk' não está instalado."""
+
+
+def calibrar_microfone(segundos=1):
+    """Mede o ruído do ambiente uma vez, para não gastar 1 s calibrando a cada frase.
+
+    O limiar continua se ajustando sozinho durante o uso (dynamic_energy_threshold).
+    """
+    global _limiar_energia
+    recognition = sr.Recognizer()
+    with sr.Microphone() as microfone:
+        recognition.adjust_for_ambient_noise(microfone, duration=segundos)
+    _limiar_energia = recognition.energy_threshold
+    log(f"Limiar de energia do microfone: {_limiar_energia:.0f}")
+    return _limiar_energia
 
 
 def find_microphone():
@@ -209,22 +225,29 @@ def SpeechRecognition(offline=None, avisar=_aviso_padrao):
     Erros do serviço de reconhecimento (sr.RequestError) e do microfone (OSError)
     são propagados para quem chamou.
     """
-    global _usar_google_a_partir_de, _avisou_offline
+    global _usar_google_a_partir_de, _avisou_offline, _limiar_energia
 
     recognition = sr.Recognizer()
     recognition.operation_timeout = TEMPO_LIMITE_GOOGLE
 
     with sr.Microphone() as microfone:
-        recognition.adjust_for_ambient_noise(microfone, duration=1)
+        if _limiar_energia is None:
+            recognition.adjust_for_ambient_noise(microfone, duration=1)
+        else:
+            recognition.energy_threshold = _limiar_energia
 
         try:
             audio = recognition.listen(
                 microfone,
-                timeout=10,
+                timeout=ESPERA_PELA_FALA,
                 phrase_time_limit=15
             )
         except sr.WaitTimeoutError:
+            _debug(avisar, f"Nenhuma fala em {ESPERA_PELA_FALA} s.")
             return None
+        finally:
+            if _limiar_energia is not None:
+                _limiar_energia = recognition.energy_threshold   # guarda o ajuste feito durante a escuta
 
     _debug(avisar, f"Áudio capturado: {len(audio.frame_data) / (audio.sample_rate * audio.sample_width):.1f} s.")
     tem_offline = offline is not None and offline.disponivel

@@ -14,6 +14,7 @@ A Python project that listens to your voice commands and performs actions on you
 - **Python 3.13.0**
 - **SpeechRecognition**: converts voice to text (Google online)
 - **Vosk**: offline voice recognition, used when there is no internet
+- **pynput**: global keyboard shortcut (CTRL+ALT+J) that tells Jarvis to listen
 - **PyAudio**: microphone access
 - **PyAutoGUI**: controls the mouse and keyboard
 - **Requests**: weather lookup (Open-Meteo API)
@@ -98,7 +99,18 @@ With the virtual environment active:
 python main.py
 ```
 
-Wait for the program to start listening, then speak your command.
+When the screen shows `Pressione CTRL+ALT+J para falar.`, press **CTRL+ALT+J** (it works with any window in front, even Word or Edge opened by Jarvis), wait for the short beep and speak your command. Jarvis listens to one sentence, answers and goes back to waiting for the shortcut.
+
+### Keyboard activation
+
+- Jarvis only listens after **CTRL+ALT+J**. If you say nothing for 10 seconds, it shows `(não entendi)` and waits for the shortcut again.
+- Presses made while Jarvis is busy (listening or running a task) are ignored, so a double press does not start a second command.
+- The keys Jarvis itself types through PyAutoGUI never trigger the shortcut.
+- The shortcut still reaches the window in front. CTRL+ALT+J does nothing in the apps Jarvis uses, but keep that in mind if you change it.
+- **Change the shortcut:** edit `ATALHO` and `NOME_ATALHO` in `ativacao.py` (pynput format, e.g. `"<ctrl>+<shift>+k"` or `"<f9>"`).
+- **Always listening, as before:** set `ATIVACAO_POR_TECLA = False` in `main.py`. Jarvis also falls back to this mode by itself (and says so in the header) if the shortcut cannot be enabled.
+- **No beep:** set `BIPE_AO_OUVIR = False` in `main.py`.
+- The microphone is calibrated once at startup (stay quiet for that second), so Jarvis starts listening right after the shortcut.
 
 ## Debug messages
 
@@ -119,7 +131,7 @@ By default Jarvis only shows what you said, its answers and, when something fail
 
   It stays on for that terminal window; close it (or set `JARVIS_DEBUG` to `0`) to turn it off.
 
-Debug lines start with `[debug]`, and the header shows "Modo debug" while it is on. The same setting applies to the automations tested alone (`python -m automacao.calc ...`).
+Debug lines start with `[debug]`, and the header shows `** MODO DEBUG **` while it is on. The same setting applies to the automations tested alone (`python -m automacao.calc ...`).
 
 ## Commands
 
@@ -157,5 +169,5 @@ python -m automacao.youtube abra o youtube
 ## Future Improvements
 
 - Support for more commands and applications
-- Wake word activation (e.g., "Hey Assistant")
+- Wake word activation (e.g., "Hey Jarvis")
 - Multi-language support

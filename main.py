@@ -7,11 +7,20 @@ import speech_recognition as sr
 
 import functions as fn
 import voice
+from ativacao import NOME_ATALHO, AtalhoGlobal, ErroAtalho
 from automacao import comum
-from automacao.comum import executar_plano
-from voice import ErroModelo, ReconhecedorOffline, SpeechRecognition, find_microphone
+from automacao.comum import executar_plano, log
+from voice import (ErroModelo, ReconhecedorOffline, SpeechRecognition, calibrar_microfone,
+                   find_microphone)
 
 WIDTH = 47
+
+# Ativação por teclado: True = o Jarvis só ouve depois do atalho (CTRL+ALT+J; para trocar a
+# tecla, veja ATALHO em ativacao.py). False = ouve o tempo todo, como antes.
+ATIVACAO_POR_TECLA = True
+BIPE_AO_OUVIR = True  # bipe curto quando o Jarvis começa a ouvir (ajuda com o console escondido)
+
+AGUARDANDO = f"Pressione {NOME_ATALHO} para falar."
 
 BANNER = r"""===============================================
 |    ___   ___   ______  _   _ _____  _____   |
@@ -45,8 +54,23 @@ def load_offline(offline):
     print(f"OK ({time.time() - inicio:.1f} s)")
 
 
+def start_hotkey():
+    """Liga o atalho de teclado. Retorna o AtalhoGlobal, ou None para ouvir o tempo todo."""
+    if not ATIVACAO_POR_TECLA:
+        return None
+
+    atalho = AtalhoGlobal()
+    try:
+        atalho.iniciar()
+    except ErroAtalho as erro:
+        print(f"Aviso: {erro} O Jarvis vai ouvir o tempo todo.")
+        return None
+    print(f"Atalho {NOME_ATALHO} ativado.")
+    return atalho
+
+
 def startup():
-    """Verifica microfone, internet e reconhecimento offline. Retorna (online, offline)."""
+    """Verifica microfone, internet, reconhecimento offline e atalho. Retorna (online, offline, atalho)."""
     print("Iniciando Jarvis...")
 
     microfone = find_microphone()
@@ -71,14 +95,25 @@ def startup():
         load_offline(offline)
         voice.preferir_offline()
 
-    return online, offline
+    print("Calibrando o microfone (fique em silêncio)...", end=" ", flush=True)
+    try:
+        calibrar_microfone()
+    except OSError as erro:
+        print()
+        print(f"ERRO ao acessar o microfone: {erro}")
+        sys.exit(1)
+    print("OK")
+
+    return online, offline, start_hotkey()
 
 
-def show_header(online):
+def show_header(online, escuta_continua=False):
     print(BANNER)
     print("VER. 1.0 - PRESSIONE CTRL+C PARA SAIR".center(WIDTH).rstrip())
     if not online:
         print("Modo off-line".center(WIDTH).rstrip())
+    if escuta_continua:
+        print("Atalho indisponível: ouvindo o tempo todo".center(WIDTH).rstrip())
     if comum.DEBUG:
         print("** MODO DEBUG **".center(WIDTH).rstrip())
     print("-" * WIDTH)
@@ -91,8 +126,18 @@ def show_notice(message):
     print("> ", end="", flush=True)
 
 
+def beep():
+    if not BIPE_AO_OUVIR:
+        return
+    try:
+        import winsound
+        winsound.Beep(880, 120)
+    except (ImportError, RuntimeError):  # fora do Windows, ou sem como tocar o bipe
+        pass
+
+
 def listen_for_text(offline):
-    """Mostra o prompt e fica ouvindo até entender uma frase."""
+    """Escuta contínua: mostra o prompt e fica ouvindo até entender uma frase."""
     print("> ", end="", flush=True)
 
     while True:
@@ -111,36 +156,84 @@ def listen_for_text(offline):
             return text
 
 
-def main():
+def listen_with_hotkey(atalho, offline):
+    """Espera o atalho e ouve uma frase. Retorna o texto, ou None se não entendeu."""
+    ignorados = atalho.descartar_pendentes()
+    if ignorados:
+        log(f"{ignorados} acionamento(s) de {NOME_ATALHO} ignorado(s): o Jarvis estava ocupado.")
+
+    print(AGUARDANDO, end="", flush=True)
+    atalho.esperar()
+    print("\r" + " " * len(AGUARDANDO) + "\r", end="")   # apaga o "Pressione..."
+    log(f"{NOME_ATALHO} pressionado: ouvindo.")
+
+    beep()
+    print("> ", end="", flush=True)
     try:
-        online, offline = startup()
+        text = SpeechRecognition(offline, show_notice)
+    except sr.RequestError as erro:
+        print(f"\nErro no serviço de reconhecimento: {erro}")
+        return None
+    except OSError as erro:
+        print(f"\nErro ao acessar o microfone: {erro}")
+        sys.exit(1)
+
+    if text:
+        print(text)
+        return text
+    print("(não entendi)")
+    return None
+
+
+def process(text):
+    """Detecta o comando na frase, responde e executa a ação (se houver)."""
+    result = fn.find_command(text)
+    if not result:
+        print("Desculpe, não entendi o comando.")
+        return
+
+    category, name = result
+    plano = fn.respond(category, name, text)
+
+    # imprime a resposta, espera 2 s e executa a ação (se houver)
+    sucesso = executar_plano(plano)
+    if plano.acao is not None:
+        if sucesso:
+            print("A tarefa foi executada com sucesso.")
+        else:
+            print("Não consegui concluir a tarefa.")
+
+
+def main():
+    atalho = None
+    try:
+        online, offline, atalho = startup()
         time.sleep(3)
         clear_screen()
-        show_header(online)
+        show_header(online, escuta_continua=ATIVACAO_POR_TECLA and atalho is None)
 
         while True:
-            text = listen_for_text(offline)
-
-            result = fn.find_command(text)
-            if result:
-                category, name = result
-                plano = fn.respond(category, name, text)
-
-                # imprime a resposta, espera 2 s e executa a ação (se houver)
-                sucesso = executar_plano(plano)
-                if plano.acao is not None:
-                    if sucesso:
-                        print("A tarefa foi executada com sucesso.")
-                    else:
-                        print("Não consegui concluir a tarefa.")
+            if atalho is not None:
+                try:
+                    text = listen_with_hotkey(atalho, offline)
+                except ErroAtalho as erro:
+                    print(f"\r{erro} O Jarvis vai ouvir o tempo todo.".ljust(len(AGUARDANDO) + 1))
+                    atalho.parar()
+                    atalho = None
+                    continue
             else:
-                print("Desculpe, não entendi o comando.")
+                text = listen_for_text(offline)
 
+            if text:
+                process(text)
             print("--")
     except KeyboardInterrupt:
         print()
         print("-" * 46)
         print("Jarvis está encerrando. Até breve!")
+    finally:
+        if atalho is not None:
+            atalho.parar()
 
 
 if __name__ == "__main__":

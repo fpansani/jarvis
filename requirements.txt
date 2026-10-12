@@ -9,6 +9,9 @@ requests==2.34.2
 # Offline speech recognition (used when there is no internet). Needs a model in models/ (see README.md).
 vosk==0.3.45
 
+# Keyboard activation (global CTRL+ALT+J hotkey, works with any window in focus).
+pynput==1.8.2
+
 # Needed by PyAutoGUI's image recognition (locateOnScreen / doubleClick('img.png')).
 # PyScreeze does not install Pillow on Python 3.12+, and "confidence=" requires OpenCV.
 Pillow==12.3.0
