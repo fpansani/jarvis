@@ -82,11 +82,38 @@ python main.py
 
 Wait for the program to start listening, then speak your command.
 
+## Commands
+
+Speak naturally; Jarvis matches keywords from `words.py` (accents and capitalization are ignored). After answering, it waits 2 seconds and then runs the automation.
+
+| Command | Example | What it does |
+|---|---|---|
+| `time` | "Que horas são?" | Says the current time |
+| `degree` | "Qual a temperatura?" | Says the current temperature |
+| `calc` | "Abra a calculadora" / "Calcule 5 vezes 2" | Opens the Calculator, or computes and types the operation |
+| `word` | "Crie um novo documento no Word e escreva uma saudação" | Opens Word, creates a document, optionally writes a greeting |
+| `excel` | "Crie uma nova planilha no Excel" | Opens Excel, optionally creates a new workbook |
+| `paint` | "Abra o Paint" | Opens Paint |
+| `yt` | "Abra o YouTube" | Opens YouTube in Edge |
+| `news` | "Me mostre as notícias do dia" | Opens CNN Brasil in Edge |
+| `site` | "Abra o site do colégio" | Opens the school website in Edge |
+| `insta` | "Abra o Instagram do colégio" | Opens the school Instagram in Edge |
+
+The PyAutoGUI automations live in the `automacao/` package. Each one can also be tested alone, from the project root with the `.venv` active, using the spoken sentence as arguments:
+
+```powershell
+python -m automacao.calc calcule 5 vezes 2
+python -m automacao.word crie um novo documento no word e escreva uma saudação
+python -m automacao.youtube abra o youtube
+```
+
 ## Notes
 
 - A working microphone and an internet connection (for speech recognition) are required. Make sure Windows allows desktop apps to use the microphone (Settings > Privacy & security > Microphone).
 - PyAutoGUI takes control of your mouse and keyboard while running. Move the mouse to a screen corner to trigger the built-in fail-safe and stop it.
 - The `.venv` folder is local to your machine and should not be committed to Git.
+- Image recognition (`automacao/imgs/`) needs `Pillow` and `opencv-python`, which are already in `requirements.txt`. Screen scaling other than 100% may stop the images from being found.
+- If an automation fails (window did not open, image not found, no internet), Jarvis prints the reason and keeps running.
 
 ## Future Improvements
 

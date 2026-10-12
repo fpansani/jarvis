@@ -1,40 +1,44 @@
 import speech_recognition as sr
 
+
+def find_microphone():
+    """Retorna o nome do microfone padrão, ou None se não houver nenhum."""
+    import pyaudio
+
+    audio = pyaudio.PyAudio()
+    try:
+        return audio.get_default_input_device_info()["name"]
+    except OSError:
+        return None
+    finally:
+        audio.terminate()
+
+
 def SpeechRecognition():
+    """Escuta uma vez e retorna o texto falado.
+
+    Retorna None se nenhuma fala foi detectada ou se a fala não foi entendida.
+    Erros do serviço de reconhecimento (sr.RequestError) e do microfone
+    (OSError) são propagados para quem chamou.
+    """
     recognition = sr.Recognizer()
 
-    try:
-        with sr.Microphone() as microfone:
-            print("Ligando o microfone...")
-            recognition.adjust_for_ambient_noise(
-                microfone, duration = 1
-            )
+    with sr.Microphone() as microfone:
+        recognition.adjust_for_ambient_noise(microfone, duration=1)
 
-            print("Fale agora...")
+        try:
             audio = recognition.listen(
                 microfone,
                 timeout=10,
                 phrase_time_limit=15
             )
+        except sr.WaitTimeoutError:
+            return None
 
-        print("Convertendo voz em texto...")
-
-        text = recognition.recognize_google(
+    try:
+        return recognition.recognize_google(
             audio,
             language='pt-BR'
         )
-
-        print(f"Você disse: {text}")
-
-        return text
-    
-    except sr.WaitTimeoutError:
-        print("Nenhuma fala detectada.")
     except sr.UnknownValueError:
-        print("Não consegui entender o que foi dito.")
-    except sr.RequestError as erro:
-        print(f"Erro no serviço de reconhecimento: {erro}")
-    except OSError as erro:
-        print(f"Erro ao aacessar o microfone: {erro}")
-
-    return None
+        return None

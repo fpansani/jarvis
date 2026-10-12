@@ -1,4 +1,12 @@
-pyaudio
-SpeechRecognition
-pyautogui
-requests
+# Jarvis - dependencies
+# Tested on Python 3.13.0 (Windows). Install inside a .venv (see README.md).
+
+PyAudio==0.2.14
+SpeechRecognition==3.17.0
+PyAutoGUI==0.9.54
+requests==2.34.2
+
+# Needed by PyAutoGUI's image recognition (locateOnScreen / doubleClick('img.png')).
+# PyScreeze does not install Pillow on Python 3.12+, and "confidence=" requires OpenCV.
+Pillow==12.3.0
+opencv-python==4.14.0.94
