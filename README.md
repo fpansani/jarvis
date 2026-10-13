@@ -239,6 +239,7 @@ Nas automações testadas sozinhas, a frase vem dos argumentos, e os erros tamb�
 | Atalho para ouvir | `ATALHO` em `ativacao.py` (formato do pynput: `"<ctrl>+<shift>+k"`, `"<f9>"`) | `"<ctrl>+<alt>+j"` |
 | Ouvir o tempo todo, sem atalho (como nas versões antigas) | `ATIVACAO_POR_TECLA` em `main.py` | `True` (usa o atalho) |
 | Bipe ao ouvir e ao cancelar | `BIPE_AO_OUVIR` em `main.py` | `True` |
+| Terminal verde, estilo Matrix (fundo preto, letras verdes; volta ao normal ao sair) | `COR_MATRIX` em `main.py` | `True` |
 | Frases prontas e pausa antes delas | `FRASES` e `PAUSA_ANTES_DA_FRASE` em `atalhos.py` | 10 frases, 1 s |
 | Palavras-chave dos comandos | `words.py` | — |
 | Cidade padrão da temperatura | `CIDADE_PADRAO` e `COORDENADAS_PADRAO` em `functions.py` | Santo André |

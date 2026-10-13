@@ -30,6 +30,7 @@ WIDTH = 47
 # False = ouve o tempo todo, como antes, sem atalhos.
 ATIVACAO_POR_TECLA = True
 BIPE_AO_OUVIR = True  # bipe agudo ao começar a ouvir e grave ao cancelar (ajuda com o console escondido)
+COR_MATRIX = True     # terminal com fundo preto e letras verdes; as cores voltam ao normal ao sair
 
 AGUARDANDO = f"Pressione {NOME_ATALHO} para falar."
 
@@ -49,6 +50,26 @@ PACOTES = ("SpeechRecognition", "PyAudio", "PyAutoGUI", "pynput", "vosk", "reque
 
 def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
+
+
+def apply_colors():
+    """Deixa o terminal no estilo Matrix: fundo preto e letras verde-claras (COR_MATRIX)."""
+    if not COR_MATRIX:
+        return
+    if os.name == "nt":
+        os.system("color 0A")           # 0 = fundo preto, A = verde-claro (vale para a janela toda)
+    else:
+        print("\033[92m", end="")       # fora do Windows: texto verde (código ANSI)
+
+
+def restore_colors():
+    """Volta o terminal às cores de antes do Jarvis."""
+    if not COR_MATRIX:
+        return
+    if os.name == "nt":
+        os.system("color")              # sem argumentos: cores padrão do terminal
+    else:
+        print("\033[0m", end="")
 
 
 # ---------------------------------------------------------------- inicialização
@@ -291,6 +312,7 @@ def process(text):
 
 def main():
     atalho = None
+    apply_colors()
     try:
         online, offline, atalho = startup()
         time.sleep(3)
@@ -320,6 +342,7 @@ def main():
     finally:
         if atalho is not None:
             atalho.parar()
+        restore_colors()
 
 
 if __name__ == "__main__":
