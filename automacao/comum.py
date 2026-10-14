@@ -35,7 +35,10 @@ ESPERA_MENU_INICIAR = 1        # segundos para o menu Iniciar abrir antes de dig
 ESPERA_RESULTADO_BUSCA = 0.5   # segundos para a busca do menu Iniciar achar o programa antes do Enter
 ALERTAS = False                # True ao testar uma automação sozinha (python -m automacao.calc ...)
 
-IMAGENS_BARRA = ["edge-searchbar.png", "edge-searchbar-blink.png"]
+# Barra de endereço do Edge, nos temas escuro e claro (o PyAutoGUI só acha a imagem do tema que
+# está na tela). imagens_do_tema() põe primeiro as do tema atual do Windows.
+IMAGENS_BARRA_ESCURO = ["edge-searchbar.png", "edge-searchbar-blink.png"]
+IMAGENS_BARRA_CLARO = ["edge-searchbar-claro.png", "edge-searchbar-blink-claro.png"]
 
 _SEM_OPENCV = False
 
@@ -54,18 +57,25 @@ SALVAR_LOG = False
 ARQUIVO_LOG = PASTA_PROJETO / "jarvis.log"
 
 # Também dá para ligar sem mexer no código, antes de rodar o Jarvis:
-#   CMD:        set JARVIS_DEBUG=1        set JARVIS_LOG=1
-#   PowerShell: $env:JARVIS_DEBUG = "1"   $env:JARVIS_LOG = "1"
+#   CMD:        set JARVIS_DEBUG=1        set JARVIS_LOG=1        set JARVIS_FORCAR_IMAGEM=1
+#   PowerShell: $env:JARVIS_DEBUG = "1"   $env:JARVIS_LOG = "1"   $env:JARVIS_FORCAR_IMAGEM = "1"
 
 
 def _ligado_no_ambiente(variavel):
     return os.environ.get(variavel, "").strip() not in ("", "0")
 
 
+# FORCAR_IMAGEM_EDGE (só para teste): ao abrir sites, pula o CTRL+L e vai direto ao
+# reconhecimento da imagem da barra de endereço. Assim dá para testar as imagens de imgs/.
+# Deixe False no uso normal: o CTRL+L é mais rápido e não depende do tema nem da escala da tela.
+FORCAR_IMAGEM_EDGE = False
+
 if _ligado_no_ambiente("JARVIS_DEBUG"):
     DEBUG = True
 if _ligado_no_ambiente("JARVIS_LOG"):
     SALVAR_LOG = True
+if _ligado_no_ambiente("JARVIS_FORCAR_IMAGEM"):
+    FORCAR_IMAGEM_EDGE = True
 
 
 def _agora():
@@ -324,6 +334,32 @@ def iniciar_programa(busca, condicao_janela, nome, timeout=20, evitar=None):
 
 # ---------------------------------------------------------------- imagens
 
+def tema_claro():
+    """True se o Windows está no tema claro, False se no escuro, None se não der para saber.
+
+    Lê a opção "modo padrão de aplicativo" (Configurações > Personalização > Cores).
+    """
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as chave:
+            valor, _ = winreg.QueryValueEx(chave, "AppsUseLightTheme")
+        return bool(valor)
+    except (ImportError, OSError):
+        return None
+
+
+def imagens_do_tema(escuras, claras):
+    """Todas as imagens, com as do tema atual do Windows primeiro.
+
+    As do outro tema continuam na lista: o Office e o Edge podem ter um tema próprio,
+    diferente do Windows.
+    """
+    claro = tema_claro()
+    log(f"Tema do Windows: {'claro' if claro else 'escuro' if claro is False else 'desconhecido'}.")
+    return list(claras) + list(escuras) if claro else list(escuras) + list(claras)
+
+
 def _caminho_imagem(imagem):
     caminho = Path(imagem)
     return caminho if caminho.is_absolute() else PASTA_IMGS / caminho.name
@@ -396,7 +432,7 @@ def _abrir_por_atalho(url, carregou):
 
 def _abrir_por_imagem(url, carregou):
     """Alternativa: clica na barra de endereço reconhecendo a imagem dela."""
-    if not encontrar_e_clicar(IMAGENS_BARRA):
+    if not encontrar_e_clicar(imagens_do_tema(IMAGENS_BARRA_ESCURO, IMAGENS_BARRA_CLARO)):
         return False
     pyautogui.write(url, interval=0.1)
     pyautogui.press("enter")
@@ -426,11 +462,15 @@ def abrir_site(url, titulo_esperado, pos_abertura=None):
     time.sleep(1)
 
     # --- Abrir o site ---
-    log("Tentando com CTRL+L...")
-    if _abrir_por_atalho(url, carregou):
+    if FORCAR_IMAGEM_EDGE:
+        log("FORCAR_IMAGEM_EDGE ligado: pulando o CTRL+L e indo direto ao reconhecimento de imagem.")
+    else:
+        log("Tentando com CTRL+L...")
+    if not FORCAR_IMAGEM_EDGE and _abrir_por_atalho(url, carregou):
         log("Site aberto com o atalho.")
     else:
-        log("Atalho não funcionou. Tentando por reconhecimento de imagem...")
+        if not FORCAR_IMAGEM_EDGE:
+            log("Atalho não funcionou. Tentando por reconhecimento de imagem...")
         if _abrir_por_imagem(url, carregou):
             log("Site aberto com a imagem.")
         else:
