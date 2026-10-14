@@ -10,9 +10,9 @@ import time
 
 import pyautogui
 
-from .comum import (Plano, aguardar_titulo, encontrar_e_clicar, erro, iniciar_programa,
-                    janela_ativa_eh, log, mencionou, rodar_isolado, seguro, simplificar,
-                    titulo_janela)
+from .comum import (Plano, aguardar_titulo, encontrar_e_clicar, erro, imagens_do_tema,
+                    iniciar_programa, janela_ativa_eh, log, mencionou, rodar_isolado, seguro,
+                    simplificar, titulo_janela)
 
 RESPOSTAS = {
     "abrir": "Certo, irei abrir o Word.",
@@ -24,7 +24,9 @@ RESPOSTAS = {
 PALAVRAS_CRIAR = ("novo", "nova", "crie", "criar", "cria", "faça", "faz", "fazer", "documento")
 
 SAUDACAO = "Oi, seja bem-vindo a nossa Feira Cultural!"
+# Botão "A^" (aumentar fonte), nos temas escuro e claro do Word
 IMAGEM_AUMENTAR_FONTE = "word-aumentartamanhofonte.png"
+IMAGEM_AUMENTAR_FONTE_CLARO = "word-aumentartamanhofonte-claro.png"
 
 
 def _eh_word(titulo):
@@ -76,7 +78,8 @@ def _escrever_saudacao(eh_o_novo):
     time.sleep(1)
 
     # Aumenta o tamanho da fonte (clica 2x no botão "A^"). Se não achar, segue com o padrão.
-    if not encontrar_e_clicar([IMAGEM_AUMENTAR_FONTE], tentativas=3, duplo=True):
+    imagens = imagens_do_tema([IMAGEM_AUMENTAR_FONTE], [IMAGEM_AUMENTAR_FONTE_CLARO])
+    if not encontrar_e_clicar(imagens, tentativas=3, duplo=True):
         log("Botão de aumentar a fonte não encontrado. Seguindo com o tamanho padrão...")
 
     if not janela_ativa_eh(eh_o_novo):

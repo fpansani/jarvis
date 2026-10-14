@@ -175,6 +175,8 @@ def show_header(online, escuta_continua=False):
         print("Atalho indisponível: ouvindo o tempo todo".center(WIDTH).rstrip())
     if comum.DEBUG:
         print("** MODO DEBUG **".center(WIDTH).rstrip())
+    if comum.FORCAR_IMAGEM_EDGE:
+        print("** TESTE: EDGE SÓ POR IMAGEM **".center(WIDTH).rstrip())
     print("-" * WIDTH)
     print("Olá, usuário. No que posso ajudar hoje?")
 
